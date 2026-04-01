@@ -1,12 +1,16 @@
 import requests
+import json
 
 SYSTEM_PROMPT = """
+You are an AI agent in a multi-agent system.
 
-You are a helpful assistant that generates code for building user interfaces based on user requirements. 
-You will
+You generate structured JSON outputs.
+
+Always return valid JSON only.
 """
 
 def llm(prompt):
+
     url = "http://localhost:11434/api/generate"
 
     payload = {
@@ -20,7 +24,4 @@ def llm(prompt):
 
     data = response.json()
 
-    return data.get('response', '')
-
-
-
+    return data.get("response", "")
