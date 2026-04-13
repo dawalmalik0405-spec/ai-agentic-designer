@@ -15,7 +15,7 @@ def planner_node(state: AgentState):
 def page_node(state: AgentState):
     pages = generate_pages(state['prompt'])
     print("Page running")
-    return {"pages": pages1}
+    return {"pages": pages}
 
 
 def ui_node(state: AgentState):
