@@ -2,13 +2,16 @@ import json
 from ai_agentic_designer.agents.llm import llm
 
 
-def generate_ui(prompt):
+def generate_ui(prompt, plan):
 
     ui_prompt = f"""
     Generate UI layout sections.
 
     User Request:
     {prompt}
+
+    Planner Output:
+    {json.dumps(plan, indent=2)}
   
 
     Return JSON:
