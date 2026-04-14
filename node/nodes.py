@@ -25,9 +25,11 @@ def ui_node(state: AgentState):
 
 def theme_node(state: AgentState):
     theme = generate_theme(state["ui"], state['plan'])
+    print("theme running")
     return {"theme": theme}
 
 def asset_node(state: AgentState):  
     assets = generate_assets(state['theme'], state['plan'])
+    print("assets running")
     return {"assets": assets}
 
