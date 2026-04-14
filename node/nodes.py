@@ -13,21 +13,21 @@ def planner_node(state: AgentState):
     return {"plan": plan}
 
 def page_node(state: AgentState):
-    pages = generate_pages(state['prompt'])
+    pages = generate_pages(state['prompt'], state['plan'])
     print("Page running")
     return {"pages": pages}
 
 
 def ui_node(state: AgentState):
-    ui_layout = generate_ui(state['prompt'])
+    ui_layout = generate_ui(state['prompt'], state['plan'])
     print("ui running")
     return {"ui_layout": ui_layout}
 
 def theme_node(state: AgentState):
-    theme = generate_theme(state['prompt'])
+    theme = generate_theme(state['prompt'], state['plan'])
     return {"theme": theme}
 
 def asset_node(state: AgentState):  
-    assets = generate_assets(state['prompt'])
+    assets = generate_assets(state['prompt'], state['plan'])
     return {"assets": assets}
 
