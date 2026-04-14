@@ -2,13 +2,14 @@ import json
 from ai_agentic_designer.agents.llm import llm
 
 
-def generate_theme(prompt):
+def generate_theme(prompt, plan):
 
     theme_prompt = f"""
     Generate UI theme.
 
     User Request:
     {prompt}
+    planner request:{plan}
 
     Return JSON:
     {{
