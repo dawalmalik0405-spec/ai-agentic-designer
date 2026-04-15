@@ -7,5 +7,5 @@ class AgentState(TypedDict):
   ui: dict
   theme: dict
   assets: dict
-  plan: str
+  plan: dict
   figma: dict
