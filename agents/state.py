@@ -8,3 +8,4 @@ class AgentState(TypedDict):
   theme: dict
   assets: dict
   plan: str
+  figma: dict
