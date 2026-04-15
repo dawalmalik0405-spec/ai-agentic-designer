@@ -4,6 +4,7 @@ from ai_agentic_designer.agents.ui_agent import generate_ui
 from ai_agentic_designer.agents.asset_agent import generate_assets
 from ai_agentic_designer.agents.planner_agent import planner
 from ai_agentic_designer.agents.state import AgentState
+from ai_agentic_designer.mcp_server.tools.figma_tool import create_ui_frames
 
 
 
@@ -32,4 +33,10 @@ def asset_node(state: AgentState):
     assets = generate_assets(state['theme'], state['plan'])
     print("assets running")
     return {"assets": assets}
+
+def figma_node(state: AgentState):
+    figma = create_ui_frames(state['ui'])
+    print("figma toold runnning ")
+    return {"figma": figma}
+
 
