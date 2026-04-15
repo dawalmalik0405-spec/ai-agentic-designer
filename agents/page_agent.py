@@ -7,6 +7,10 @@ def generate_pages(prompt, plan):
   page_prompt = f"""
   
   Generate website pages based on the user request.
+  Use the planner output pages list to generate ALL pages.
+  Generate content for each page.
+
+  Do NOT return a single page.
 
   user request: {prompt}
   Planner Output: {json.dumps(plan, indent=2)}
@@ -20,6 +24,10 @@ def generate_pages(prompt, plan):
         "name": "home",
         "content": "..."
       }},
+      {{
+        "name": "about", 
+        "content": "..."
+      }}
       ...
     ]
   }}

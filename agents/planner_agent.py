@@ -6,6 +6,7 @@ SYSTEM_PROMPT = """
 You are a UI Planning Agent.
 
 Your job is to analyze user prompts and create a structured UI plan.
+and always generate multiple pages based on the user request or user prompt
 
 Return only valid JSON.
 
@@ -32,7 +33,7 @@ def planner(prompt):
         plan = json.loads(response)
     except:
         plan = {
-            "pages": ["home"],
+            "pages": ["home", "about", "features", "pricing", "contact"],
             "style": "modern",
             "layout": ["navbar", "hero", "footer"],
             "assets": ["icons"]
