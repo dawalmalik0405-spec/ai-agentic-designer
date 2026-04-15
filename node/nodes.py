@@ -36,7 +36,10 @@ def asset_node(state: AgentState):
 
 def figma_node(state: AgentState):
     figma = create_ui_frames(state['ui']['layout'])
+    print(state["ui"]["layout"])
     print("figma toold runnning ")
+    if "layout" not in state["ui"]:
+        return {"figma": {}}
     return {"figma": figma}
 
 
