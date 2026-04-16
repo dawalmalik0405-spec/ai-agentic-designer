@@ -20,7 +20,7 @@ def page_node(state: AgentState):
 
 
 def ui_node(state: AgentState):
-    ui_layout = generate_ui(state["pages"]["plan"])
+    ui_layout = generate_ui(state["pages"]["pages"],state["plan"])
     print("ui running")
     return {"ui": ui_layout}
 
