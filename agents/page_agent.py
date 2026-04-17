@@ -27,6 +27,9 @@ def generate_pages(prompt, plan):
     - Output MUST be valid JSON only
     - Do NOT include explanations, text, or comments
 
+    Return ONLY valid JSON.
+      Do NOT include markdown, explanations, or text.
+
     Return ONLY this format:
 
     {{
@@ -40,6 +43,7 @@ def generate_pages(prompt, plan):
     """
 
   response = llm(page_prompt)
+  print("RAW LLM RESPONSE:", response)
 
   try:
     match = re.search(r'\{.*\}', response, re.DOTALL)
