@@ -1,11 +1,7 @@
 from typing import TypedDict
 
 
-class AgentState(TypedDict):
-  prompt: str
-  pages: dict
-  ui: dict
-  theme: dict
-  assets: dict
-  plan: dict
-  figma: dict
+class AgentState(TypedDict, total=False):
+    prompt: str
+    site_spec: dict
+    figma_result: dict

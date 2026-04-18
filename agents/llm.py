@@ -1,5 +1,6 @@
-import requests
 import json
+
+import requests
 
 SYSTEM_PROMPT = """
 You are an AI UI/UX design system that helps generate structured outputs
@@ -13,12 +14,19 @@ def llm(prompt, system_prompt=None):
     payload = {
         "model": "qwen3:8b",
         "prompt": prompt,
-        "system": SYSTEM_PROMPT,
+        "system": system_prompt or SYSTEM_PROMPT,
         "stream": False,
     }
 
-    response = requests.post(url, json=payload)
+    try:
+        response = requests.post(url, json=payload, timeout=45)
+        response.raise_for_status()
+    except requests.RequestException:
+        return ""
 
-    data = response.json()
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        return ""
 
     return data.get("response", "")
