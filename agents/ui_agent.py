@@ -1,8 +1,7 @@
 import json
 from ai_agentic_designer.agents.llm import llm
-from ai_agentic_designer.mcp_server.tools.figma_tool import get_remote_figma_tools
 
-tools, client = get_remote_figma_tools()
+
 
 
 def generate_ui(prompt, plan):
