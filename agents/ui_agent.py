@@ -1,6 +1,8 @@
 import json
 from ai_agentic_designer.agents.llm import llm
-from ai_agentic_designer.mcp_server.tools.figma_tool import create_ui_frames
+from ai_agentic_designer.mcp_server.tools.figma_tool import get_remote_figma_tools
+
+tools, client = get_remote_figma_tools()
 
 
 def generate_ui(prompt, plan):
@@ -12,6 +14,14 @@ def generate_ui(prompt, plan):
     {prompt}
     Planner Output:
     {json.dumps(plan, indent=2)}
+    You are the UI Design Agent.
+
+    Your role:
+    - Convert structured website specs into polished Figma designs.
+    - Use tools instead of describing actions.
+    - Prefer strong hierarchy, spacing, responsive layouts.
+    - Reuse design system components when possible.
+    - Build complete pages.
 
     STRICT RULES:
     - Use ONLY layout from planner
@@ -21,9 +31,13 @@ def generate_ui(prompt, plan):
 
     Return JSON:
     {{
-    "layout": ["navbar", "hero", "footer"]
-    }}
-"""
+    "brand":"Nova AI",
+    "style":"modern dark",
+    "pages":[...],
+    "tokens":{...},
+    "sections":[...]
+        }}
+    """
 
     response = llm(ui_prompt)
 
