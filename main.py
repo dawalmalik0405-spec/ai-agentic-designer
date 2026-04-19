@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from ai_agentic_designer.agents.graphs import create_agent_graph
+from agents.planner_agent import planner
 
 app = FastAPI()
-graph = create_agent_graph()
 
 
 class PromptRequest(BaseModel):
@@ -18,8 +17,9 @@ def root():
 
 @app.post("/generate")
 def generate(request: PromptRequest):
-    result = graph.invoke({"prompt": request.prompt}, config={"recursion_limit": 100})
+
+    result = planner(request.prompt)
+
     return {
-        "site_spec": result.get("site_spec", {}),
-        "figma_result": result.get("figma_result", {}),
+        "result": result
     }
