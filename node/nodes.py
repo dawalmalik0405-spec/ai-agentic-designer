@@ -34,12 +34,5 @@ def asset_node(state: AgentState):
     print("assets running")
     return {"assets": assets}
 
-def figma_node(state: AgentState):
-    figma = create_ui_frames.invoke({
-    "layout": state['ui']['layout']})
-    print(state["ui"]["layout"])
-    print("figma toold runnning ")
-    if "layout" not in state["ui"]:
-        return {"figma": {}}
-    return {"figma": figma}
+
 
