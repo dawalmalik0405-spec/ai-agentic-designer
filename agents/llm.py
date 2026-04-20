@@ -1,12 +1,9 @@
 import requests
 import json
 
-SYSTEM_PROMPT = """
-You are an AI UI/UX design system that helps generate structured outputs
-for building websites using multi-agent architecture.
-"""
 
-def llm(prompt, SYSTEM_PROMPT=True):
+
+def llm(prompt, SYSTEM_PROMPT=None):
 
     url = "http://localhost:11434/api/generate"
 
