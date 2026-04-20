@@ -34,17 +34,22 @@ def planner(prompt):
     planning_prompt = f"""
     User Request:
     {prompt}
-    you are just an elite planning agent 
 
      
     Return ONLY valid JSON in this Example  format
     don't rely on the example you can extend it acccording what user wants:
 
     {{
-        "pages": {{
-                    "marketing_pages": [...],
-                    "product_pages": [...],
-                    "support_pages": [...]
+        "page_groups": {{
+                    "marketing_pages": [],
+                    "service_pages": [],
+                    "catalog_pages": [],
+                    "auth_pages": [],
+                    "dashboard_pages": [],
+                    "resource_pages": [],
+                    "docs_pages": [],
+                    "support_pages": [],
+                    "legal_pages": []
                     }},
         "style": "",
         "layout": {{
@@ -77,10 +82,10 @@ def planner(prompt):
 
     return plan
 
-prompt = " portfolio for ML engineer"
+# prompt = " portfolio for ML engineer"
 
-l = planner(prompt=prompt)
-print(f"ai output:{l}")
+# l = planner(prompt=prompt)
+# print(f"ai output:{l}")
 
 
 
