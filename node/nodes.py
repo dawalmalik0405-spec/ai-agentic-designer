@@ -1,5 +1,5 @@
 from ai_agentic_designer.agents.page_agent import generate_pages
-from ai_agentic_designer.agents.design_agent import generate_theme
+from ai_agentic_designer.agents.design_agent import generate_design
 from ai_agentic_designer.agents.ui_agent import generate_ui
 from ai_agentic_designer.agents.planner_agent import planner
 from ai_agentic_designer.agents.state import AgentState
@@ -23,7 +23,7 @@ def ui_node(state: AgentState):
     return {"ui": ui_layout}
 
 def design_node(state: AgentState):
-    theme = generate_theme(state["ui"], state['plan'])
+    theme = generate_design(state["ui"], state['plan'])
     print("theme running")
     return {"theme": theme}
 
