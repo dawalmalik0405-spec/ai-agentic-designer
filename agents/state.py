@@ -6,6 +6,5 @@ class AgentState(TypedDict):
   pages: dict
   ui: dict
   theme: dict
-  assets: dict
   plan: dict
 
