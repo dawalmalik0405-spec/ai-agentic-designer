@@ -18,14 +18,18 @@ def page_node(state: AgentState):
 
 
 def ui_node(state: AgentState):
-    ui_layout = generate_ui(state["pages"]["pages"],state["plan"])
+    ui_layout = generate_ui(
+        state["prompt"],
+        state["pages"],
+        state["design"]
+    )
     print("ui running")
     return {"ui": ui_layout}
 
 def design_node(state: AgentState):
-    theme = generate_design(state["ui"], state['plan'])
+    design = generate_design(state["prompt"], state["plan"])
     print("theme running")
-    return {"theme": theme}
+    return {"theme": design}
 
 
 
