@@ -77,6 +77,7 @@ Rules:
 """
 
     response = llm(design_prompt, SYSTEM_PROMPT=SYSTEM_PROMPT)
+    print(f"rseponse:{response}")
 
     try:
         match = re.search(r'\{[\s\S]*\}', response)
@@ -167,4 +168,4 @@ plan = {
 
 l = generate_design(prompt=prompt, plan=plan)
 
-print(json.dumps(l, indent=2))
+print(f"{json.dumps(l, indent=2)}")
