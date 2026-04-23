@@ -29,7 +29,7 @@ def ui_node(state: AgentState):
 def design_node(state: AgentState):
     design = generate_design(state["prompt"], state["plan"])
     print("theme running")
-    return {"theme": design}
+    return {"design": design}
 
 
 
