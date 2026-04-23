@@ -27,6 +27,10 @@ Rules:
 - Use all sections provided
 - Do not invent random pages
 - Keep layouts premium and modern
+- Ensure valid JSON syntax.
+- No trailing commas.
+- All keys quoted.
+- No comments.
 """
 
 
@@ -84,44 +88,20 @@ Rules:
 
     response = llm(ui_prompt, SYSTEM_PROMPT=SYSTEM_PROMPT)
     print("RAW UI RESPONSE:", response)
+    ui = {
+        "pages": []
+    }
 
     try:
-        match = re.search(r'\{[\s\S]*\}', response)
+        match = re.search(r'\{.*\}', response, re.DOTALL)
 
         if not match:
             raise ValueError("No JSON found")
 
         ui = json.loads(match.group())
 
-    except:
-        ui = {
-            "pages": [
-                {
-                    "name": "home",
-                    "route": "/",
-                    "ui_sections": [
-                        {
-                            "type": "navbar",
-                            "variant": "default_navbar",
-                            "layout": "horizontal",
-                            "motion": "fade_down"
-                        },
-                        {
-                            "type": "hero",
-                            "variant": "default_hero",
-                            "layout": "2_column",
-                            "motion": "fade_up"
-                        },
-                        {
-                            "type": "footer",
-                            "variant": "default_footer",
-                            "layout": "stacked",
-                            "motion": "fade_in"
-                        }
-                    ]
-                }
-            ]
-        }
+    except Exception as e:
+        print("UI parse failed:", e)
 
     return ui
 
