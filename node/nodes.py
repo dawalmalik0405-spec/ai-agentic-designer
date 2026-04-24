@@ -2,6 +2,7 @@ from ai_agentic_designer.agents.page_agent import generate_pages
 from ai_agentic_designer.agents.design_agent import generate_design
 from ai_agentic_designer.agents.ui_agent import generate_ui
 from ai_agentic_designer.agents.planner_agent import planner
+from ai_agentic_designer.agents.code_agent import generate_code
 from ai_agentic_designer.agents.state import AgentState
 
 
@@ -30,6 +31,12 @@ def design_node(state: AgentState):
     design = generate_design(state["prompt"], state["plan"])
     print("theme running")
     return {"design": design}
+
+
+def code_node(state: AgentState):
+    code = generate_code(state=state)
+    print("code agent running")
+    return {"code": code}
 
 
 
