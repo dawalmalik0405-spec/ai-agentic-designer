@@ -16,7 +16,7 @@ def llm(prompt, SYSTEM_PROMPT=None):
         }
     }
 
-    response = requests.post(url, json=payload, timeout=120)
+    response = requests.post(url, json=payload, timeout=420)
     response.raise_for_status()
 
     data = response.json()
