@@ -5,7 +5,7 @@ def llm(prompt, SYSTEM_PROMPT=None):
     url = "http://localhost:11434/api/generate"
 
     payload = {
-        "model": "qwen3:8b",
+        "model": "llama3:latest ",
         "prompt": prompt,
         "system": SYSTEM_PROMPT or "",
         "stream": False,
