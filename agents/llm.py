@@ -30,21 +30,28 @@ def llm(prompt, SYSTEM_PROMPT=None):
 
 
 
-def llm_gemini(prompt, SYSTEM_PROMPT=None):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+def llm_groq(prompt, SYSTEM_PROMPT=None):
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": os.getenv("GEMINI_API_KEY") 
+        "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}"
     }
     messages = []
     if SYSTEM_PROMPT:
-        messages.append({"role": "user", "parts": [{"text": SYSTEM_PROMPT}]})
-        messages.append({"role": "model", "parts": [{"text": "Understood."}]})
-    messages.append({"role": "user", "parts": [{"text": prompt}]})
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+    messages.append({"role": "user", "content": prompt})
+    
     payload = {
-        "contents": messages,
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192}
+        "model": "llama-3.3-70b-versatile",
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 8192
     }
     response = requests.post(url, headers=headers, json=payload)
     data = response.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    
+    if "choices" not in data:
+        print("Groq error:", data)
+        raise Exception(f"Groq error: {data}")
+    
+    return data["choices"][0]["message"]["content"]
