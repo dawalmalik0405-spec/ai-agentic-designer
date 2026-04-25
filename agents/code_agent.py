@@ -96,7 +96,7 @@ Requirements:
     imports = []
     routes_code = []
 
-    for page in ui_pages:
+    for page in ui_pages[:1]:
         page_name = page.get("name", "page")
         route = page.get("route", "/")
 
