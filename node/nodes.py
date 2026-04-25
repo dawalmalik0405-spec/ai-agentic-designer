@@ -34,9 +34,9 @@ def design_node(state: AgentState):
 
 
 def code_node(state: AgentState):
-    code = generate_code(state=state)
+    result = generate_code(state=state)
     print("code agent running")
-    return {"code": code}
+    return {"files": result["files"]}
 
 
 
