@@ -161,18 +161,24 @@ export default function App() {{
     <div className="min-h-screen" style={{{{ background: "{background}", color: "{text}" }}}}>
       <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <a href="#/" className="text-sm font-semibold uppercase tracking-[0.35em]" style={{{{ color: "{accent}" }}}}>
+          <button
+            type="button"
+            onClick={{() => setRoute("/")}}
+            className="text-sm font-semibold uppercase tracking-[0.35em]"
+            style={{{{ color: "{accent}" }}}}
+          >
             Agentic UI
-          </a>
+          </button>
           <nav className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
             {{navigation.map((item) => (
-              <a
+              <button
+                type="button"
                 key={{item.route}}
-                href={{`#${{item.route}}`}}
+                onClick={{() => setRoute(item.route)}}
                 className={{{active_class}}}
               >
                 {{item.label}}
-              </a>
+              </button>
             ))}}
           </nav>
         </div>
