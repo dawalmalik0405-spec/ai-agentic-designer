@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ai_agentic_designer.agents.llm import PLANNING_MODEL, invoke_structured_model
+from agents.llm import PLANNING_MODEL, invoke_structured_model
 
 
 logger = logging.getLogger(__name__)
