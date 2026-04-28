@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph
 
-from ai_agentic_designer.agents.state import AgentState
-from ai_agentic_designer.node.nodes import code_node, planner_node
+from agents.state import AgentState
+from node.nodes import code_node, planner_node
 
 
 def create_agent_graph():

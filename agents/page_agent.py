@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ValidationError
 
-from ai_agentic_designer.agents.planner_agent import PlannedPage
+from agents.planner_agent import PlannedPage
 
 
 def _dump_model(model: BaseModel) -> dict:
