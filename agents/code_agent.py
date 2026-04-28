@@ -184,6 +184,131 @@ export default function App() {{
 """.strip()
 
 
+def _build_main_file() -> str:
+    return """
+import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./styles.css";
+
+createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+""".strip()
+
+
+def _build_index_html() -> str:
+    return """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Generated Website</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+""".strip()
+
+
+def _build_package_json() -> str:
+    return json.dumps(
+        {
+            "name": "generated-website",
+            "private": True,
+            "version": "0.0.0",
+            "type": "module",
+            "scripts": {
+                "dev": "vite",
+                "build": "vite build",
+                "preview": "vite preview",
+            },
+            "dependencies": {
+                "@vitejs/plugin-react": "latest",
+                "vite": "latest",
+                "typescript": "latest",
+                "react": "latest",
+                "react-dom": "latest",
+                "tailwindcss": "latest",
+                "@tailwindcss/vite": "latest",
+            },
+            "devDependencies": {},
+        },
+        indent=2,
+    )
+
+
+def _build_styles_file(design: dict) -> str:
+    background = design.get("palette", {}).get("background", "#020617")
+    text = design.get("palette", {}).get("text", "#f8fafc")
+    primary = design.get("palette", {}).get("primary", "#22d3ee")
+    accent = design.get("palette", {}).get("accent", "#d3ff72")
+
+    return f"""
+@import "tailwindcss";
+
+:root {{
+  color: {text};
+  background: {background};
+  --color-primary: {primary};
+  --color-accent: {accent};
+}}
+
+html,
+body,
+#root {{
+  min-height: 100%;
+  margin: 0;
+}}
+
+body {{
+  background: {background};
+}}
+
+* {{
+  box-sizing: border-box;
+}}
+""".strip()
+
+
+def _build_vite_config() -> str:
+    return """
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    host: "127.0.0.1"
+  }
+});
+""".strip()
+
+
+def _package_project_files(files: dict[str, str], design: dict) -> dict[str, str]:
+    packaged: dict[str, str] = {
+        "package.json": _build_package_json(),
+        "index.html": _build_index_html(),
+        "vite.config.js": _build_vite_config(),
+        "src/main.jsx": _build_main_file(),
+        "src/styles.css": _build_styles_file(design),
+    }
+
+    for name, code in files.items():
+        if name == "App.jsx":
+            packaged["src/App.jsx"] = code
+        else:
+            packaged[f"src/pages/{name}"] = code
+
+    return packaged
+
+
 async def _generate_single_page(
     prompt: str,
     design: dict,
@@ -302,5 +427,8 @@ export default function App() {
     print("[code] app shell: building", flush=True)
     files["App.jsx"] = _build_app_shell(page_specs=page_specs, design=design)
     print("[code] app shell: completed", flush=True)
+    print("[code] project package: building", flush=True)
+    files = _package_project_files(files=files, design=design)
+    print(f"[code] project package: completed ({len(files)} files)", flush=True)
 
     return {"files": files}
