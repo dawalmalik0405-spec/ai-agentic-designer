@@ -22,7 +22,7 @@ export default function App() {
     setFiles(nextFiles)
     setMeta({
       fileCount: Object.keys(nextFiles).length,
-      pageCount: Object.keys(nextFiles).filter((name) => name !== "App.jsx").length,
+      pageCount: Object.keys(nextFiles).filter((name) => name.startsWith("src/pages/")).length,
       lastPrompt: prompt
     })
   }
