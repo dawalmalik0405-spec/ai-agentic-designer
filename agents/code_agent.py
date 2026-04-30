@@ -3,7 +3,10 @@ import json
 import logging
 import re
 
-from agents.llm import CODE_MODEL, invoke_text_model_async
+try:
+    from .llm import CODE_MODEL, invoke_text_model_async
+except ImportError:
+    from agents.llm import CODE_MODEL, invoke_text_model_async
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,9 @@ Quality rules:
 - If the concept strongly benefits from advanced animation, introduce it carefully and only when the component still remains buildable
 - Avoid placeholder lorem ipsum
 - Keep sections purposeful and visually distinct
+- Do not reference undeclared local asset files
+- Do not use /assets/*, /public/*, root-relative media files, or local .svg/.png/.jpg/.mp4/.webm paths
+- Use CSS gradients, inline SVG, and pure JSX/Tailwind structure instead of file-based media
 """
 
 
@@ -43,8 +49,46 @@ def _component_name(page_name: str) -> str:
     return "".join(word.capitalize() for word in page_name.split("_")) or "Page"
 
 
+def _derive_brand_label(prompt: str) -> str:
+    stopwords = {
+        "a",
+        "an",
+        "and",
+        "app",
+        "build",
+        "create",
+        "design",
+        "for",
+        "generate",
+        "landing",
+        "page",
+        "premium",
+        "site",
+        "startup",
+        "style",
+        "the",
+        "website",
+        "with",
+    }
+    tokens = re.findall(r"[A-Za-z0-9]+", prompt)
+    filtered = [token for token in tokens if token.lower() not in stopwords]
+
+    if not filtered:
+        return "Studio"
+
+    selected = filtered[:2]
+    normalized = []
+    for token in selected:
+        if token.lower() == "ai":
+            normalized.append("AI")
+        else:
+            normalized.append(token.capitalize())
+    return " ".join(normalized)
+
+
 def _normalize_page_specs(state: dict) -> list[dict]:
     page_map: dict[str, dict] = {}
+    image_map = state.get("images", {}).get("pages", {})
 
     for page in state.get("pages", {}).get("pages", []):
         page_name = page.get("name")
@@ -56,7 +100,10 @@ def _normalize_page_specs(state: dict) -> list[dict]:
             "type": page.get("type", "marketing"),
             "goal": page.get("goal", ""),
             "sections": page.get("sections", []),
+            "image_prompt": page.get("image_prompt", ""),
+            "requires_generated_visual": page.get("requires_generated_visual", False),
             "ui_sections": [],
+            "images": image_map.get(page_name, {}),
         }
 
     for page in state.get("ui", {}).get("pages", []):
@@ -71,7 +118,10 @@ def _normalize_page_specs(state: dict) -> list[dict]:
                 "type": "marketing",
                 "goal": "",
                 "sections": [],
+                "image_prompt": "",
+                "requires_generated_visual": False,
                 "ui_sections": page.get("ui_sections", []),
+                "images": image_map.get(page_name, {}),
             }
         else:
             page_map[page_name]["ui_sections"] = page.get("ui_sections", [])
@@ -103,7 +153,7 @@ export default function {component_name}() {{
 """.strip()
 
 
-def _build_app_shell(page_specs: list[dict], design: dict) -> str:
+def _build_app_shell(page_specs: list[dict], design: dict, brand_label: str) -> str:
     imports = []
     route_entries = []
     nav_links = []
@@ -167,7 +217,7 @@ export default function App() {{
             className="text-sm font-semibold uppercase tracking-[0.35em]"
             style={{{{ color: "{accent}" }}}}
           >
-            Agentic UI
+            {brand_label}
           </button>
           <nav className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
             {{navigation.map((item) => (
@@ -205,21 +255,21 @@ createRoot(document.getElementById("root")).render(
 """.strip()
 
 
-def _build_index_html() -> str:
+def _build_index_html(site_title: str) -> str:
     return """
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Generated Website</title>
+    <title>__SITE_TITLE__</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
-""".strip()
+""".replace("__SITE_TITLE__", site_title).strip()
 
 
 def _build_package_json() -> str:
@@ -297,10 +347,10 @@ export default defineConfig({
 """.strip()
 
 
-def _package_project_files(files: dict[str, str], design: dict) -> dict[str, str]:
+def _package_project_files(files: dict[str, str], design: dict, site_title: str) -> dict[str, str]:
     packaged: dict[str, str] = {
         "package.json": _build_package_json(),
-        "index.html": _build_index_html(),
+        "index.html": _build_index_html(site_title=site_title),
         "vite.config.js": _build_vite_config(),
         "src/main.jsx": _build_main_file(),
         "src/styles.css": _build_styles_file(design),
@@ -317,6 +367,7 @@ def _package_project_files(files: dict[str, str], design: dict) -> dict[str, str
 
 async def _generate_single_page(
     prompt: str,
+    selected_style: str,
     design: dict,
     page: dict,
     site_context: list[dict],
@@ -327,6 +378,9 @@ async def _generate_single_page(
     code_prompt = f"""
 User Request:
 {prompt}
+
+Selected Design Style:
+{selected_style}
 
 Shared Design System:
 {json.dumps(design, indent=2)}
@@ -347,6 +401,12 @@ Implementation requirements:
 - Create strong motion-ready composition inspired by GSAP, Framer Motion, and React Three Fiber
 - Use tasteful gradients, layered backgrounds, glass, grids, cards, and strong typography when appropriate
 - Do not require external assets
+- Do not reference /assets/*, /public/*, or root-relative media files
+- Do not depend on local svg/image/video files
+- Use the provided remote image URLs when a hero, banner, showcase, or product visual improves the page
+- Never invent your own image URLs; only use the URLs present in the Current Page payload
+- If Current Page requires_generated_visual is true, you must visibly use at least one provided generated image URL in the rendered JSX
+- Prefer large editorial image treatments for premium marketing pages rather than small decorative thumbnails
 - Keep the component self-contained
 - Ensure the page feels connected to the other site pages through tone and navigation cues
 - Keep JSX valid and production-lean
@@ -369,8 +429,10 @@ Implementation requirements:
 
 def generate_code(state: dict) -> dict:
     prompt = state.get("prompt", "")
+    selected_style = state.get("selected_style", "minimalism")
     design = state.get("design", {})
     page_specs = _normalize_page_specs(state)
+    brand_label = _derive_brand_label(prompt)
 
     if not page_specs:
         return {
@@ -392,6 +454,7 @@ export default function App() {
         tasks = [
             _generate_single_page(
                 prompt=prompt,
+                selected_style=selected_style,
                 design=design,
                 page=page,
                 site_context=[
@@ -431,10 +494,14 @@ export default function App() {
 
     files = asyncio.run(_generate_all_pages())
     print("[code] app shell: building", flush=True)
-    files["App.jsx"] = _build_app_shell(page_specs=page_specs, design=design)
+    files["App.jsx"] = _build_app_shell(
+        page_specs=page_specs,
+        design=design,
+        brand_label=brand_label,
+    )
     print("[code] app shell: completed", flush=True)
     print("[code] project package: building", flush=True)
-    files = _package_project_files(files=files, design=design)
+    files = _package_project_files(files=files, design=design, site_title=brand_label)
     print(f"[code] project package: completed ({len(files)} files)", flush=True)
 
     return {"files": files}
