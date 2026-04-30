@@ -1,6 +1,9 @@
 from pydantic import BaseModel, ValidationError
 
-from agents.planner_agent import DesignSystem
+try:
+    from .planner_agent import DesignSystem
+except ImportError:
+    from agents.planner_agent import DesignSystem
 
 
 def _dump_model(model: BaseModel) -> dict:
