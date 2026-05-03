@@ -87,13 +87,20 @@ def _is_deepseek_model(model_name: str) -> bool:
     return "deepseek" in model_name.lower()
 
 
-def _resolve_model_options(model_name: str, temperature: float) -> dict[str, Any]:
+def _resolve_model_options(
+    model_name: str,
+    temperature: float,
+    max_completion_tokens: int | None = None,
+) -> dict[str, Any]:
     if model_name == CODE_MODEL:
         top_p = CODE_TOP_P
         max_tokens = CODE_MAX_TOKENS
     else:
         top_p = PLANNING_TOP_P
         max_tokens = PLANNING_MAX_TOKENS
+
+    if max_completion_tokens is not None:
+        max_tokens = max_completion_tokens
 
     options: dict[str, Any] = {
         "model": model_name,
@@ -113,7 +120,11 @@ def _resolve_model_options(model_name: str, temperature: float) -> dict[str, Any
     return options
 
 
-def _build_model(model_name: str, temperature: float) -> ChatNVIDIA:
+def _build_model(
+    model_name: str,
+    temperature: float,
+    max_completion_tokens: int | None = None,
+) -> ChatNVIDIA:
     api_key = (
         os.getenv("NVIDIA_API_KEY")
         or os.getenv("NGC_API_KEY")
@@ -124,7 +135,11 @@ def _build_model(model_name: str, temperature: float) -> ChatNVIDIA:
             "NVIDIA_API_KEY is not configured"
         )
 
-    options = _resolve_model_options(model_name=model_name, temperature=temperature)
+    options = _resolve_model_options(
+        model_name=model_name,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
     print(f"[llm] initializing model: {model_name}", flush=True)
 
     return ChatNVIDIA(
@@ -194,8 +209,13 @@ def invoke_text_model(
     system_prompt: str | None = None,
     model_name: str = CODE_MODEL,
     temperature: float = 0.6,
+    max_completion_tokens: int | None = None,
 ) -> str:
-    model = _build_model(model_name=model_name, temperature=temperature)
+    model = _build_model(
+        model_name=model_name,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
     messages = []
 
     if system_prompt:
@@ -211,8 +231,13 @@ async def invoke_text_model_async(
     system_prompt: str | None = None,
     model_name: str = CODE_MODEL,
     temperature: float = 0.6,
+    max_completion_tokens: int | None = None,
 ) -> str:
-    model = _build_model(model_name=model_name, temperature=temperature)
+    model = _build_model(
+        model_name=model_name,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
     messages = []
 
     if system_prompt:
@@ -228,8 +253,13 @@ def stream_text_model(
     system_prompt: str | None = None,
     model_name: str = PLANNING_MODEL,
     temperature: float = 0.6,
+    max_completion_tokens: int | None = None,
 ) -> Iterator[dict[str, str | None]]:
-    model = _build_model(model_name=model_name, temperature=temperature)
+    model = _build_model(
+        model_name=model_name,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
     messages = []
 
     if system_prompt:
@@ -272,8 +302,13 @@ def invoke_structured_model(
     model_name: str = PLANNING_MODEL,
     temperature: float = 0.2,
     max_attempts: int = 3,
+    max_completion_tokens: int | None = None,
 ) -> BaseModel:
-    model = _build_model(model_name=model_name, temperature=temperature)
+    model = _build_model(
+        model_name=model_name,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+    )
     response_format_instructions = (
         f"{prompt}\n\n"
         "Return valid JSON only. Do not wrap the response in markdown. "
