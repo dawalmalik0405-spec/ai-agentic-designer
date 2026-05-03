@@ -5,10 +5,49 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agents.llm import PLANNING_MODEL, invoke_structured_model
+try:
+    from .llm import PLANNING_MODEL, invoke_structured_model
+except ImportError:
+    from agents.llm import PLANNING_MODEL, invoke_structured_model
 
 
 logger = logging.getLogger(__name__)
+
+VALID_STYLES = {
+    "glassmorphism",
+    "skeuomorphism",
+    "claymorphism",
+    "minimalism",
+    "liquid_glass",
+    "neo_brutalism",
+}
+
+STYLE_GUIDANCE = {
+    "glassmorphism": {
+        "visuals": "frosted glass panels, blur, translucent layering, dark backgrounds, neon or cool accent lighting",
+        "motion": "smooth fades, soft parallax, fluid transitions",
+    },
+    "skeuomorphism": {
+        "visuals": "realistic materials, depth, tactile controls, shadowed physical surfaces",
+        "motion": "press and release motion, tactile easing, restrained realism",
+    },
+    "claymorphism": {
+        "visuals": "soft 3D blobs, pastel colors, rounded shapes, inflated surfaces",
+        "motion": "bouncy spring motion, playful easing, floating elements",
+    },
+    "minimalism": {
+        "visuals": "clean typography, strong whitespace, restrained color, crisp hierarchy",
+        "motion": "subtle fades, minimal transforms, no visual noise",
+    },
+    "liquid_glass": {
+        "visuals": "visionOS-style translucent surfaces, saturated blur, liquid highlights, morphing forms",
+        "motion": "fluid morphing transitions, depth-rich movement, elegant motion continuity",
+    },
+    "neo_brutalism": {
+        "visuals": "hard borders, flat high-contrast colors, raw typography, offset shadows",
+        "motion": "sharp snap transitions, abrupt but intentional movement, glitch accents",
+    },
+}
 
 
 def _dump_model(model: BaseModel) -> dict:
@@ -84,6 +123,8 @@ class PlannedPage(BaseModel):
     goal: str
     sections: list[str] = Field(default_factory=list)
     ui_sections: list[UISection] = Field(default_factory=list)
+    image_prompt: str = ""
+    requires_generated_visual: bool = False
 
 
 class SiteSpecification(BaseModel):
@@ -110,7 +151,15 @@ Requirements:
 - Use snake_case names for page names and section types.
 - Home page route must be "/".
 - Other routes must begin with "/".
+- The selected style is mandatory and must drive the full design system, section variants, and motion language.
 """
+
+
+def _normalize_selected_style(selected_style: str | None) -> str:
+    style = (selected_style or "minimalism").strip().lower().replace(" ", "_").replace("-", "_")
+    if style not in VALID_STYLES:
+        return "minimalism"
+    return style
 
 
 def _normalize_page_name(name: str) -> str:
@@ -139,6 +188,26 @@ def _normalize_sections(sections: list[str]) -> list[str]:
             normalized.append(section_name)
 
     return normalized[:7]
+
+
+def _page_requires_generated_visual(page_type: str, sections: list[str]) -> bool:
+    normalized_type = str(page_type).lower()
+    section_set = {str(section).lower() for section in sections}
+    visual_sections = {
+        "hero",
+        "showcase",
+        "banner",
+        "gallery",
+        "demo_preview",
+        "product_detail",
+        "culture",
+        "featured_posts",
+        "featured_technology",
+        "mission",
+    }
+    if "marketing" in normalized_type:
+        return True
+    return bool(section_set & visual_sections)
 
 
 def _normalize_site_spec(spec: SiteSpecification) -> SiteSpecification:
@@ -196,6 +265,12 @@ def _normalize_site_spec(spec: SiteSpecification) -> SiteSpecification:
                 goal=str(raw_page.goal).strip() or "present content clearly",
                 sections=normalized_sections or ["navbar", "hero", "content", "footer"],
                 ui_sections=normalized_ui_sections,
+                image_prompt=str(raw_page.image_prompt).strip(),
+                requires_generated_visual=bool(raw_page.requires_generated_visual)
+                or _page_requires_generated_visual(
+                    str(raw_page.type).strip() or "marketing",
+                    normalized_sections or ["navbar", "hero", "content", "footer"],
+                ),
             )
         )
 
@@ -239,6 +314,8 @@ def _normalize_site_spec(spec: SiteSpecification) -> SiteSpecification:
                         motion="fade_up",
                     ),
                 ],
+                image_prompt="premium futuristic hero render with editorial lighting and immersive product atmosphere",
+                requires_generated_visual=True,
             )
         ]
 
@@ -257,6 +334,8 @@ def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
                 "type": page.type,
                 "goal": page.goal,
                 "sections": page.sections,
+                "image_prompt": page.image_prompt,
+                "requires_generated_visual": page.requires_generated_visual,
             }
             for page in spec.pages
         ]
@@ -281,10 +360,20 @@ def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
     }
 
 
-def planner(prompt: str) -> dict[str, Any]:
+def planner(prompt: str, selected_style: str = "minimalism") -> dict[str, Any]:
+    normalized_style = _normalize_selected_style(selected_style)
+    style_guidance = STYLE_GUIDANCE[normalized_style]
+
     planning_prompt = f"""
 User Request:
 {prompt}
+
+Selected Design Style:
+{normalized_style}
+
+Style-Specific Visual Direction:
+- Visual language: {style_guidance["visuals"]}
+- Motion language: {style_guidance["motion"]}
 
 Return a complete website specification with:
 - plan
@@ -293,10 +382,15 @@ Return a complete website specification with:
 
 Rules:
 - Keep the website practical but premium.
+- The output must strongly and consistently express the selected design style.
+- Set plan.style to the selected style name or a close style-family derivative of it.
+- Make the design palette, surface system, typography, motion, and ui_sections consistent with the selected style.
 - Every page must include both sections and ui_sections.
 - ui_sections must align one-to-one with the page sections whenever possible.
 - Favor premium animation-ready variants.
 - Include shared navigation and footer patterns across public pages.
+- Each page must include an image_prompt for hero or background image generation.
+- Set requires_generated_visual=true for pages that need image-led premium presentation.
 - For SaaS, startup, AI, gaming, or futuristic products, bias toward bold motion and high-contrast premium composition.
 - For trust-heavy categories like finance, law, healthcare, or B2B enterprise, keep the design more restrained and trustworthy.
 """
@@ -312,6 +406,7 @@ Rules:
 
     logger.info("Merged planning spec generated with %s pages", len(spec.pages))
     state_payload = _site_spec_to_state(spec)
+    state_payload["plan"]["style"] = normalized_style
 
     if os.getenv("PRINT_AGENT_JSON", "false").lower() in {"1", "true", "yes", "on"}:
         print("[planner] validated json output:", flush=True)
