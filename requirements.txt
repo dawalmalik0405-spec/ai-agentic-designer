@@ -5,4 +5,5 @@ python-dotenv
 langchain
 langgraph
 langchain-nvidia-ai-endpoints
+langchain-mcp-adapters
 requests
