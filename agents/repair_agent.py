@@ -2,10 +2,7 @@ import asyncio
 import json
 from typing import Any
 
-try:
-    from .llm import CODE_MODEL, invoke_text_model_async
-except ImportError:
-    from agents.llm import CODE_MODEL, invoke_text_model_async
+from agents.llm import CODE_MODEL, invoke_text_model_async
 
 
 SYSTEM_PROMPT = """
