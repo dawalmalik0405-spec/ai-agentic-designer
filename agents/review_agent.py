@@ -1,13 +1,22 @@
+"""
+Review Agent
+-------------
+Validates generated pages for visual consistency, performance, and animation quality.
+Uses real Playwright MCP tool via centralized MCPManager.
+"""
+
+import asyncio
 import json
+import logging
 import re
-from typing import Any
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
-try:
-    from .llm import CODE_MODEL, invoke_structured_model
-except ImportError:
-    from agents.llm import CODE_MODEL, invoke_structured_model
+from agents.llm import CODE_MODEL, invoke_structured_model
+from mcp_tools.initialize_mcps import get_tools_for_agent
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewIssue(BaseModel):
@@ -46,26 +55,20 @@ Rules:
 
 
 def _dump_model(model: BaseModel) -> dict:
-    if hasattr(model, "model_dump"):
-        return model.model_dump()
-    return model.dict()
+    return model.model_dump() if hasattr(model, "model_dump") else model.dict()
 
 
 def _collect_project_files(files: dict[str, str]) -> dict[str, str]:
     interesting = {}
-
     for path, content in files.items():
         if path.endswith((".jsx", ".js", ".css", ".html", ".json")):
             interesting[path] = content
-
     return interesting
 
 
 def _truncate_content(content: str, limit: int = 1800) -> str:
     normalized = content.strip()
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[:limit] + "\n/* truncated for review */"
+    return normalized if len(normalized) <= limit else normalized[:limit] + "\n/* truncated for review */"
 
 
 def _build_review_snapshot(state: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
@@ -238,13 +241,55 @@ def _dedupe_issues(issues: list[dict[str, str]]) -> list[dict[str, str]]:
     return deduped
 
 
+async def _run_playwright_checks(url: str, state: dict) -> dict:
+    """Run Playwright MCP checks for visual and performance validation."""
+    try:
+        tools = await get_tools_for_agent("review")
+        playwright_tool = tools[0] if tools else None
+        if not playwright_tool:
+            logger.error("No Playwright tool found")
+            return {}
+        result = await playwright_tool.ainvoke({
+            "url": url,
+            "checks": ["screenshot", "fps", "animation_timing"]
+        })
+        # result may be ToolMessage or dict
+        if isinstance(result, dict):
+            return result
+        else:
+            content = getattr(result, "content", None)
+            if content:
+                try:
+                    import json
+                    return json.loads(content)
+                except Exception:
+                    return {}
+    except Exception as exc:
+        logger.error(f"Playwright check failed: {exc}")
+    return {}
+
+
 def review_project(state: dict[str, Any]) -> dict[str, Any]:
+    import asyncio
     files = _collect_project_files(state.get("files", {}))
     review_snapshot = _build_review_snapshot(state=state, files=files)
     deterministic_issues = _find_missing_asset_issues(files) + _find_missing_generated_image_usage(
         state=state,
         files=files,
     )
+
+    # Run Playwright MCP checks (synchronous wrapper around async function)
+    try:
+        playwright_results = asyncio.run(_run_playwright_checks("file://localhost", state))
+    except Exception as exc:
+        logger.error(f"Playwright check failed: {exc}")
+        playwright_results = {}
+
+    # Merge Playwright issues if any
+    if playwright_results.get("issues"):
+        deterministic_issues.extend(playwright_results["issues"])
+    # Attach playwright results to state for later use
+    state["playwright_results"] = playwright_results
 
     prompt = f"""
 User request:
