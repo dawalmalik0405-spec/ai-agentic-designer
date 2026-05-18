@@ -12,6 +12,43 @@ from agents.designing_agent import DesigningAgent, get_designing_agent
 logger = logging.getLogger(__name__)
 
 
+def _build_design_page_blueprint(state: AgentState, page: dict) -> dict:
+    page_name = str(page.get("name", "")).strip()
+    ui_pages = {
+        item.get("name"): item
+        for item in (state.get("ui", {}) or {}).get("pages", [])
+        if isinstance(item, dict) and item.get("name")
+    }
+    ui_page = ui_pages.get(page_name)
+
+    style_name = str(page.get("style", "")).strip()
+    animation_intent = str(page.get("animation_intent", "")).strip()
+    ui_sections = ui_page.get("ui_sections", []) if ui_page else []
+
+    missing_fields = []
+    if not page_name:
+        missing_fields.append("page.name")
+    if not style_name:
+        missing_fields.append("page.style")
+    if not ui_page:
+        missing_fields.append(f"ui.pages[{page_name}]")
+    if not animation_intent:
+        missing_fields.append("page.animation_intent")
+
+    if missing_fields:
+        raise ValueError(
+            "Cannot build design page blueprint; missing "
+            + ", ".join(missing_fields)
+        )
+
+    return {
+        **page,
+        "style": style_name,
+        "animation_intent": animation_intent,
+        "ui_sections": ui_sections,
+    }
+
+
 def planner_node(state: AgentState):
     try:
         selected_style = state.get("selected_style", "minimalism")
@@ -119,10 +156,12 @@ async def design_node(state: AgentState):
         animation_specs = {}
         page_templates = {}
         for page in pages:
-            result = await agent.generate_for_page(page)
-            design_systems[page.get("name")] = result.get("design_system")
-            animation_specs[page.get("name")] = result.get("animation_spec")
-            page_templates[page.get("name")] = result.get("page_template")
+            page_blueprint = _build_design_page_blueprint(state=state, page=page)
+            result = await agent.generate_for_page(page_blueprint)
+            page_name = page_blueprint["name"]
+            design_systems[page_name] = result.get("design_system")
+            animation_specs[page_name] = result.get("animation_spec")
+            page_templates[page_name] = result.get("page_template")
         print(f"[agent] design: completed for {len(pages)} pages", flush=True)
         return {
             "design_system": design_systems,

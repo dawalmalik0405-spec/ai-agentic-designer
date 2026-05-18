@@ -91,6 +91,27 @@ class ResearchAgent:
                     self.query_docs_tool = t
             self._tools_loaded = True
 
+    @staticmethod
+    def _build_research_query(keyword: str, animation_goal: str) -> str:
+        style = str(keyword or "").strip().lower()
+        request = re.sub(r"\s+", " ", str(animation_goal or "").strip())
+        request = request[:180]
+
+        style_modifiers = {
+            "minimalism": "minimalist editorial website ui inspiration",
+            "glassmorphism": "glassmorphism landing page ui inspiration",
+            "skeuomorphism": "skeuomorphic interface ui inspiration",
+            "claymorphism": "claymorphism 3d soft ui inspiration",
+            "liquid_glass": "liquid glass premium interface inspiration",
+            "neo_brutalism": "neo brutalist website ui inspiration",
+        }
+
+        style_phrase = style_modifiers.get(style, f"{style} website ui inspiration")
+
+        if request:
+            return f"{request} {style_phrase}"
+        return style_phrase
+
     async def _scrape_patterns(self, keyword: str) -> List[str]:
         await self._ensure_tools()
         if not self.firecrawl_search_tool:
@@ -126,6 +147,45 @@ class ResearchAgent:
         except Exception as exc:
             logger.error(f"Firecrawl scrape failed for keyword '{keyword}': {exc}")
         return []
+
+    async def _scrape_patterns_for_request(self, keyword: str, animation_goal: str) -> List[str]:
+        query = self._build_research_query(keyword=keyword, animation_goal=animation_goal)
+        logger.info("Research query: %s", query)
+
+        await self._ensure_tools()
+        if not self.firecrawl_search_tool:
+            logger.error("Firecrawl search tool is unavailable")
+            return []
+
+        try:
+            result = await self.firecrawl_search_tool.ainvoke({
+                "query": query,
+                "limit": 8,
+                "sources": [{"type": "web"}, {"type": "images"}],
+            })
+            payload = self._extract_payload(result)
+            if isinstance(payload, dict):
+                candidates = payload.get("data") or payload.get("results") or []
+            elif isinstance(payload, list):
+                candidates = payload
+            else:
+                candidates = [payload] if payload else []
+
+            normalized: List[str] = []
+            for item in candidates:
+                if isinstance(item, dict):
+                    title = item.get("title") or item.get("metadata", {}).get("title") or ""
+                    url = item.get("url") or item.get("sourceURL") or ""
+                    snippet = item.get("description") or item.get("markdown") or item.get("content") or ""
+                    text = " | ".join(part for part in [title, snippet, url] if part)
+                    if text:
+                        normalized.append(text)
+                elif item:
+                    normalized.append(str(item))
+            return normalized
+        except Exception as exc:
+            logger.error("Firecrawl scrape failed for query '%s': %s", query, exc)
+            return []
 
     async def _fetch_library_docs(self, lib_name: str, query: str) -> List[str]:
         await self._ensure_tools()
@@ -201,8 +261,8 @@ Return ONLY the summary text, no JSON, no markdown fences.
         keyword = keyword.lower()
         animation_goal = animation_goal.lower()
 
-        # Scrape visual patterns
-        patterns = await self._scrape_patterns(keyword)
+        # Scrape visual patterns using both design style and product/domain context.
+        patterns = await self._scrape_patterns_for_request(keyword, animation_goal)
 
         # Choose relevant animation library
         lib_map = {

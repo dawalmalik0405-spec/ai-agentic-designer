@@ -1,0 +1,101 @@
+{
+  "page_name": "home",
+  "style": "minimalism",
+  "design_system": {
+    "colors": {
+      "primary": "#FFFFFF",
+      "secondary": "#111111",
+      "background": "#000000",
+      "accent": "#FFFFFF"
+    },
+    "typography": {
+      "fontFamily": "sans-serif",
+      "sizes": {
+        "xs": "10px",
+        "sm": "11px",
+        "md": "12px",
+        "lg": "14px",
+        "xl": "16px"
+      },
+      "weights": {
+        "normal": 400,
+        "medium": 500,
+        "bold": 600
+      }
+    },
+    "motion": {
+      "easingCurves": {
+        "smooth": "power2.out",
+        "bouncy": "elastic.out(1, 0.5)",
+        "precise": "power3.inOut",
+        "natural": "sine.inOut"
+      },
+      "durations": {
+        "short": 0.3,
+        "medium": 0.6,
+        "long": 1.2,
+        "interaction": 0.2
+      },
+      "defaults": {
+        "ease": "power2.out",
+        "duration": 0.6,
+        "stagger": 0.05
+      }
+    }
+  },
+  "animation_spec": [
+    {
+      "type": "gsap",
+      "selector": ".threejs-canvas",
+      "properties": {
+        "opacity": 1,
+        "y": 0
+      },
+      "duration": 800,
+      "easing": "power3.out",
+      "fallback": {
+        "type": "css",
+        "properties": {
+          "opacity": "1",
+          "transform": "translateY(0)"
+        },
+        "duration": 800
+      }
+    },
+    {
+      "type": "gsap",
+      "selector": ".threejs-object",
+      "properties": {
+        "opacity": 1,
+        "y": 0
+      },
+      "duration": 600,
+      "easing": "power2.out",
+      "fallback": {
+        "type": "css",
+        "properties": {
+          "opacity": "1",
+          "transform": "translateY(0)"
+        },
+        "duration": 600
+      }
+    },
+    {
+      "type": "gsap",
+      "selector": ".threejs-object",
+      "properties": {
+        "scale": 1.1
+      },
+      "duration": 500,
+      "easing": "power1.inOut",
+      "fallback": {
+        "type": "css",
+        "properties": {
+          "transform": "scale(1.1)"
+        },
+        "duration": 500
+      }
+    }
+  ],
+  "component": "export default function Home() {\n  // TODO: Insert generated JSX using design_system & animation_spec\n}"
+}

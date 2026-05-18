@@ -193,8 +193,23 @@ class DesigningAgent:
         return spec
 
     async def generate_for_page(self, page_blueprint: Dict) -> Dict:
-        style_name = page_blueprint.get("style", "minimalism")
-        animation_intent = page_blueprint.get("animation_intent", "basic fade in")
+        page_name = str(page_blueprint.get("name", "")).strip()
+        style_name = str(page_blueprint.get("style", "")).strip()
+        animation_intent = str(page_blueprint.get("animation_intent", "")).strip()
+
+        missing_fields = []
+        if not page_name:
+            missing_fields.append("name")
+        if not style_name:
+            missing_fields.append("style")
+        if not animation_intent:
+            missing_fields.append("animation_intent")
+
+        if missing_fields:
+            raise ValueError(
+                "DesigningAgent requires explicit page blueprint fields: "
+                + ", ".join(missing_fields)
+            )
 
         # Ensure MCP tools are loaded
         await self._ensure_tools()
@@ -212,15 +227,15 @@ class DesigningAgent:
 
         # Build template
         template = {
-            "page_name": page_blueprint.get("name", "unknown"),
+            "page_name": page_name,
             "style": style_name,
             "design_system": design_system,
             "animation_spec": animation_spec,
-            "component": f"export default function {page_blueprint.get('name', 'Page').title().replace('_','')}() {{\n  // TODO: Insert generated JSX using design_system & animation_spec\n}}"
+            "component": f"export default function {page_name.title().replace('_','')}() {{\n  // TODO: Insert generated JSX using design_system & animation_spec\n}}"
         }
 
         # Persist template
-        tmpl_path = f"page_templates/{page_blueprint.get('name', 'page')}.json"
+        tmpl_path = f"page_templates/{page_name}.json"
         try:
             if self.create_directory_tool:
                 await self.create_directory_tool.ainvoke({"path": "page_templates"})

@@ -156,9 +156,12 @@ Requirements:
 
 
 def _normalize_selected_style(selected_style: str | None) -> str:
-    style = (selected_style or "minimalism").strip().lower().replace(" ", "_").replace("-", "_")
+    style = str(selected_style or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if not style:
+        raise ValueError("selected_style is required")
     if style not in VALID_STYLES:
-        return "minimalism"
+        allowed = ", ".join(sorted(VALID_STYLES))
+        raise ValueError(f"selected_style must be one of: {allowed}")
     return style
 
 
@@ -325,6 +328,8 @@ def _normalize_site_spec(spec: SiteSpecification) -> SiteSpecification:
 
 def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
     spec = _normalize_site_spec(spec)
+    design_motion = str(spec.design.motion).strip()
+    design_style = str(spec.design.style_family).strip()
 
     pages_payload = {
         "pages": [
@@ -334,6 +339,17 @@ def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
                 "type": page.type,
                 "goal": page.goal,
                 "sections": page.sections,
+                "style": design_style,
+                "animation_intent": " | ".join(
+                    dict.fromkeys(
+                        [
+                            str(section.motion).strip()
+                            for section in page.ui_sections
+                            if str(section.motion).strip()
+                        ]
+                    )
+                )
+                or design_motion,
                 "image_prompt": page.image_prompt,
                 "requires_generated_visual": page.requires_generated_visual,
             }

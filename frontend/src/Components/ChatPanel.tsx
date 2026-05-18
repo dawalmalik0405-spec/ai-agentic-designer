@@ -12,6 +12,15 @@ interface Props {
   onGenerated: (files: GeneratedFiles, prompt: string) => void
 }
 
+const STYLE_OPTIONS = [
+  { value: "minimalism", label: "Minimalism" },
+  { value: "glassmorphism", label: "Glassmorphism" },
+  { value: "skeuomorphism", label: "Skeuomorphism" },
+  { value: "claymorphism", label: "Claymorphism" },
+  { value: "liquid_glass", label: "Liquid Glass" },
+  { value: "neo_brutalism", label: "Neo Brutalism" }
+]
+
 function createMessage(role: Message["role"], text: string): Message {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -22,9 +31,10 @@ function createMessage(role: Message["role"], text: string): Message {
 
 export default function ChatPanel({ meta, onGenerated }: Props) {
   const [messages, setMessages] = useState<Message[]>([
-    createMessage("system", "Backend ready. Submit a prompt to generate a website.")
+    createMessage("system", "Backend ready. Choose a design style and submit a prompt to generate a website.")
   ])
   const [input, setInput] = useState("Create futuristic AI startup website")
+  const [selectedStyle, setSelectedStyle] = useState("")
   const [loading, setLoading] = useState(false)
 
   const handleSend = async () => {
@@ -42,7 +52,7 @@ export default function ChatPanel({ meta, onGenerated }: Props) {
       const response = await fetch("/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, selected_style: selectedStyle })
       })
 
       const data = await response.json()
@@ -117,6 +127,26 @@ export default function ChatPanel({ meta, onGenerated }: Props) {
       </div>
 
       <div className="border-t border-[#2a2c31] p-4">
+        <label className="mb-3 block">
+          <span className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-[#8f969f]">
+            Design Style
+          </span>
+          <select
+            value={selectedStyle}
+            onChange={(event) => setSelectedStyle(event.target.value)}
+            disabled={loading}
+            className="w-full rounded-md border border-[#30333a] bg-[#0f1013] px-3 py-3 text-sm text-[#f8f4ea] outline-none transition focus:border-[#d3ff72]/70 disabled:opacity-60"
+          >
+            <option value="" disabled>
+              Select a style
+            </option>
+            {STYLE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
@@ -128,7 +158,7 @@ export default function ChatPanel({ meta, onGenerated }: Props) {
         <button
           type="button"
           onClick={handleSend}
-          disabled={loading || !input.trim()}
+          disabled={loading || !input.trim() || !selectedStyle}
           className="mt-3 w-full rounded-md bg-[#d3ff72] px-4 py-3 text-sm font-semibold text-[#12140f] transition hover:bg-[#e0ff94] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Generating..." : "Generate Website"}

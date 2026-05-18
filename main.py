@@ -48,7 +48,7 @@ class PromptRequest(BaseModel):
     }
 
     prompt: str = Field(min_length=1, max_length=1000)
-    selected_style: str = "minimalism"
+    selected_style: str = Field(min_length=1)
 
     @validator("prompt")
     def validate_prompt(cls, value: str) -> str:

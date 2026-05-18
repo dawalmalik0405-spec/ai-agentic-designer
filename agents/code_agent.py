@@ -129,30 +129,6 @@ def _normalize_page_specs(state: dict) -> list[dict]:
     return list(page_map.values())
 
 
-def _fallback_component(page: dict, error: str) -> str:
-    component_name = _component_name(page.get("name", "page"))
-    title = page.get("name", "page").replace("_", " ").title()
-    goal = page.get("goal", "Display the page content.")
-
-    return f"""
-export default function {component_name}() {{
-  return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 px-6 py-16">
-      <div className="mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/5 p-10 shadow-2xl shadow-cyan-500/10">
-        <p className="text-xs uppercase tracking-[0.4em] text-cyan-300">Fallback Render</p>
-        <h1 className="mt-4 text-4xl font-semibold">{title}</h1>
-        <p className="mt-4 max-w-2xl text-slate-300">{goal}</p>
-        <div className="mt-10 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5 text-sm text-amber-100">
-          Code generation recovered from an error for this page.
-        </div>
-        <pre className="mt-6 overflow-x-auto rounded-2xl bg-black/40 p-5 text-xs text-slate-300">{json.dumps(error)}</pre>
-      </div>
-    </main>
-  )
-}}
-""".strip()
-
-
 def _build_app_shell(page_specs: list[dict], design: dict, brand_label: str) -> str:
     imports = []
     route_entries = []
@@ -451,8 +427,8 @@ export default function App() {
 
     async def _generate_all_pages() -> dict[str, str]:
         print(f"[code] parallel generation: {len(page_specs)} page tasks", flush=True)
-        tasks = [
-            _generate_single_page(
+        tasks = {
+            page["name"]: _generate_single_page(
                 prompt=prompt,
                 selected_style=selected_style,
                 design=design,
@@ -468,27 +444,33 @@ export default function App() {
                 ],
             )
             for page in page_specs
-        ]
+        }
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         files: dict[str, str] = {}
+        failures: list[str] = []
 
-        for page, result in zip(page_specs, results):
-            file_name = f"{_component_name(page['name'])}.jsx"
+        for page_name, result in zip(tasks.keys(), results):
+            file_name = f"{_component_name(page_name)}.jsx"
 
             if isinstance(result, Exception):
-                print(f"[code] {file_name}: fallback generated after error", flush=True)
+                print(f"[code] {file_name}: generation failed", flush=True)
                 logger.error(
                     "Page generation failed for %s: %s",
-                    page["name"],
+                    page_name,
                     result,
                     exc_info=result,
                 )
-                files[file_name] = _fallback_component(page, str(result))
+                failures.append(f"{page_name}: {result}")
                 continue
 
             generated_file_name, code = result
             files[generated_file_name] = code
+
+        if failures:
+            raise RuntimeError(
+                "Page code generation failed for: " + "; ".join(failures)
+            )
 
         return files
 

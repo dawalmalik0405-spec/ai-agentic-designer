@@ -1,0 +1,47 @@
+{
+  "colors": {
+    "primary": "#3a1d5e",
+    "secondary": "#6b2e8c",
+    "background": "#1a0a26",
+    "accent": "#f8d75c"
+  },
+  "typography": {
+    "fontFamily": "'Cinzel', 'Georgia', serif",
+    "heading": {
+      "size": "2.5rem",
+      "weight": "700"
+    },
+    "body": {
+      "size": "1.125rem",
+      "weight": "400"
+    },
+    "caption": {
+      "size": "0.875rem",
+      "weight": "300"
+    },
+    "display": {
+      "size": "4rem",
+      "weight": "800"
+    }
+  },
+  "motion": {
+    "easing": {
+      "default": "power3.out",
+      "bouncy": "elastic.out(1, 0.5)",
+      "press": "back.in(1.7)",
+      "rebound": "bounce.out"
+    },
+    "durations": {
+      "short": 0.3,
+      "default": 0.6,
+      "long": 1.2,
+      "pulse": 0.8
+    },
+    "threejsDefaults": {
+      "animationLoopSpeed": 0.00025,
+      "outlineEffectIntensity": 1.2,
+      "gradientMapSteps": 5,
+      "lightPulseFrequency": 3
+    }
+  }
+}
