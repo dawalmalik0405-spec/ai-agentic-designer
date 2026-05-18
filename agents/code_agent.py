@@ -405,25 +405,15 @@ Implementation requirements:
 
 def generate_code(state: dict) -> dict:
     prompt = state.get("prompt", "")
-    selected_style = state.get("selected_style", "minimalism")
+    selected_style = str(state.get("selected_style", "")).strip()
+    if not selected_style:
+        raise ValueError("selected_style is required")
     design = state.get("design", {})
     page_specs = _normalize_page_specs(state)
     brand_label = _derive_brand_label(prompt)
 
     if not page_specs:
-        return {
-            "files": {
-                "App.jsx": """
-export default function App() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
-      No UI pages generated
-    </div>
-  )
-}
-""".strip()
-            }
-        }
+        raise ValueError("No UI pages generated")
 
     async def _generate_all_pages() -> dict[str, str]:
         print(f"[code] parallel generation: {len(page_specs)} page tasks", flush=True)

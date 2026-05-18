@@ -376,7 +376,7 @@ def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
     }
 
 
-def planner(prompt: str, selected_style: str = "minimalism") -> dict[str, Any]:
+def planner(prompt: str, selected_style: str) -> dict[str, Any]:
     normalized_style = _normalize_selected_style(selected_style)
     style_guidance = STYLE_GUIDANCE[normalized_style]
 

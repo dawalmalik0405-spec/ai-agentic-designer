@@ -143,6 +143,38 @@ class DesigningAgent:
         except Exception as exc:
             logger.error(f"Failed to write design token for {style_name}: {exc}")
 
+    @staticmethod
+    def _condense_doc_snippets(
+        doc_snippets: List[str],
+        *,
+        max_snippets: int = 2,
+        max_chars_per_snippet: int = 600,
+        max_total_chars: int = 1200,
+    ) -> List[str]:
+        condensed: List[str] = []
+        total_chars = 0
+
+        for snippet in doc_snippets:
+            if len(condensed) >= max_snippets:
+                break
+
+            normalized = " ".join(str(snippet).split()).strip()
+            if not normalized:
+                continue
+
+            trimmed = normalized[:max_chars_per_snippet]
+            remaining = max_total_chars - total_chars
+            if remaining <= 0:
+                break
+
+            if len(trimmed) > remaining:
+                trimmed = trimmed[:remaining]
+
+            condensed.append(trimmed)
+            total_chars += len(trimmed)
+
+        return condensed
+
     async def _generate_style_system(self, style_name: str, doc_snippets: List[str]) -> Dict:
         doc_blob = "\n".join(doc_snippets)
         prompt = (
@@ -217,6 +249,12 @@ class DesigningAgent:
         # Pull relevant docs
         doc_snippets = await self._fetch_doc_examples("Three.js", f"{style_name} style examples with Three.js")
         doc_snippets += await self._fetch_doc_examples("GSAP", f"{style_name} animation patterns using GSAP")
+        doc_snippets = self._condense_doc_snippets(doc_snippets)
+        logger.info(
+            "Using %s condensed documentation snippets for page %s",
+            len(doc_snippets),
+            page_name,
+        )
 
         # Generate design system
         design_system = await self._generate_style_system(style_name, doc_snippets)
