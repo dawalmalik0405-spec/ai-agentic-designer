@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, Annotated
 
 
 class AgentState(TypedDict, total=False):
@@ -11,7 +11,7 @@ class AgentState(TypedDict, total=False):
     images: dict
     files: dict
     review: dict
-    current_agent: str
+    current_agent: Annotated[str, frozenset(["research", "planner", "code", "design", "review"])]
     repair_count: int
     is_complete: bool
     errors: list[str]
