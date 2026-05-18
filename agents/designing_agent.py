@@ -8,10 +8,11 @@ Uses real MCP tools via the centralized MCPManager.
 import json
 import logging
 import asyncio
+import re
 from typing import Dict, List, Any
 
 from agents.llm import invoke_text_model
-from mcp_tools.initialize_mcps import get_tools_for_agent, get_mcp_manager
+from mcp_tools.initialize_mcps import get_tools_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -21,38 +22,107 @@ class DesigningAgent:
 
     def __init__(self):
         self._tools_loaded = False
-        self.context7_tool = None
-        self.filesystem_tool = None
+        self.resolve_library_tool = None
+        self.query_docs_tool = None
+        self.write_file_tool = None
+        self.create_directory_tool = None
+
+    @staticmethod
+    def _extract_payload(result: Any) -> Any:
+        if isinstance(result, dict):
+            return result
+
+        content = getattr(result, "content", None)
+        if isinstance(content, list):
+            content = "\n".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+
+        if isinstance(content, str):
+            try:
+                return json.loads(content)
+            except Exception:
+                return content
+
+        return result
+
+    @staticmethod
+    def _extract_context7_library_id(payload: Any) -> str | None:
+        candidates: list[str] = []
+
+        if isinstance(payload, str):
+            candidates.append(payload)
+        elif isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, dict) and "text" in item:
+                    candidates.append(str(item["text"]))
+                elif item:
+                    candidates.append(str(item))
+        elif isinstance(payload, dict):
+            for key in ("text", "content", "results", "data"):
+                value = payload.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict) and "text" in item:
+                            candidates.append(str(item["text"]))
+                        elif item:
+                            candidates.append(str(item))
+
+        for candidate in candidates:
+            match = re.search(r"Context7-compatible library ID:\s*(/[^\s]+)", candidate)
+            if match:
+                return match.group(1)
+
+        return None
 
     async def _ensure_tools(self):
         if not self._tools_loaded:
             tools = await get_tools_for_agent("design")
-            # Find context7 tool by name
             for t in tools:
-                if "context7" in t.name.lower():
-                    self.context7_tool = t
-                if any(x in t.name.lower() for x in ["file", "write", "read"]):
-                    self.filesystem_tool = t
+                if t.name == "resolve-library-id":
+                    self.resolve_library_tool = t
+                elif t.name == "query-docs":
+                    self.query_docs_tool = t
+                elif t.name == "write_file":
+                    self.write_file_tool = t
+                elif t.name == "create_directory":
+                    self.create_directory_tool = t
             self._tools_loaded = True
 
     async def _fetch_doc_examples(self, lib_name: str, query: str) -> List[str]:
         await self._ensure_tools()
+        if not self.resolve_library_tool or not self.query_docs_tool:
+            logger.error("Context7 tools are unavailable")
+            return []
+
         try:
-            # Use the context7 tool via ainvoke
-            resp = await self.context7_tool.ainvoke({"query": query, "libraries": [lib_name]})
-            # resp may be a dict or ToolMessage; adapt
-            if isinstance(resp, dict):
-                return resp.get("results", [])
+            resolved = await self.resolve_library_tool.ainvoke({
+                "query": query,
+                "libraryName": lib_name,
+            })
+            resolved_payload = self._extract_payload(resolved)
+            library_id = self._extract_context7_library_id(resolved_payload)
+
+            if not library_id:
+                logger.error("Context7 failed to resolve library id for %s", lib_name)
+                return []
+
+            resp = await self.query_docs_tool.ainvoke({
+                "libraryId": library_id,
+                "query": query,
+            })
+            payload = self._extract_payload(resp)
+            if isinstance(payload, dict):
+                results = payload.get("results") or payload.get("snippets") or payload.get("data") or []
+            elif isinstance(payload, list):
+                results = payload
             else:
-                # possibly a ToolMessage with content attribute
-                content = getattr(resp, "content", None)
-                if content:
-                    import json
-                    try:
-                        data = json.loads(content)
-                        return data.get("results", [])
-                    except Exception:
-                        return []
+                results = [payload] if payload else []
+
+            return [json.dumps(item) if isinstance(item, dict) else str(item) for item in results]
         except Exception as exc:
             logger.error(f"Context7 lookup failed for {lib_name}: {exc}")
         return []
@@ -61,8 +131,12 @@ class DesigningAgent:
         await self._ensure_tools()
         path = f"design_tokens/{style_name}.json"
         try:
-            await self.filesystem_tool.ainvoke({
-                "operation": "write",
+            if self.create_directory_tool:
+                await self.create_directory_tool.ainvoke({"path": "design_tokens"})
+            if not self.write_file_tool:
+                logger.error("Filesystem write_file tool is unavailable")
+                return
+            await self.write_file_tool.ainvoke({
                 "path": path,
                 "content": json.dumps(token_dict, indent=2)
             })
@@ -148,8 +222,16 @@ class DesigningAgent:
         # Persist template
         tmpl_path = f"page_templates/{page_blueprint.get('name', 'page')}.json"
         try:
-            await self.filesystem_tool.ainvoke({
-                "operation": "write",
+            if self.create_directory_tool:
+                await self.create_directory_tool.ainvoke({"path": "page_templates"})
+            if not self.write_file_tool:
+                logger.error("Filesystem write_file tool is unavailable")
+                return {
+                    "design_system": design_system,
+                    "animation_spec": animation_spec,
+                    "page_template": template,
+                }
+            await self.write_file_tool.ainvoke({
                 "path": tmpl_path,
                 "content": json.dumps(template, indent=2)
             })
