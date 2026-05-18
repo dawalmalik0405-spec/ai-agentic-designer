@@ -1,20 +1,13 @@
+import asyncio
 import logging
 
-try:
-    from ..agents.code_agent import generate_code
-    from ..agents.image_agent import generate_images
-    from ..agents.planner_agent import planner
-    from ..agents.repair_agent import repair_project
-    from ..agents.review_agent import review_project
-    from ..agents.state import AgentState
-except ImportError:
-    from agents.code_agent import generate_code
-    from agents.image_agent import generate_images
-    from agents.planner_agent import planner
-    from agents.repair_agent import repair_project
-    from agents.review_agent import review_project
-    from agents.state import AgentState
-
+from agents.code_agent import generate_code
+from agents.planner_agent import planner
+from agents.repair_agent import repair_project
+from agents.review_agent import review_project
+from agents.state import AgentState
+from agents.research_agent import ResearchAgent
+from agents.designing_agent import DesigningAgent, get_designing_agent
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +26,6 @@ def planner_node(state: AgentState):
             "design": result["design"],
             "pages": result["pages"],
             "ui": result["ui"],
-            "current_agent": "planner",
         }
     except Exception as exc:
         logger.exception("Planner node failed")
@@ -59,22 +51,6 @@ def code_node(state: AgentState):
         errors = list(state.get("errors", []))
         errors.append(f"code: {exc}")
         raise RuntimeError(f"Code node failed: {exc}") from exc
-
-
-def image_node(state: AgentState):
-    try:
-        print("[agent] image: started", flush=True)
-        result = generate_images(state=state)
-        image_count = len(result.get("images", {}).get("pages", {}))
-        print(f"[agent] image: completed ({image_count} pages)", flush=True)
-        logger.info("Image node completed")
-        return {
-            "images": result["images"],
-            "current_agent": "image",
-        }
-    except Exception as exc:
-        logger.exception("Image node failed")
-        raise RuntimeError(f"Image node failed: {exc}") from exc
 
 
 def review_node(state: AgentState):
@@ -112,3 +88,48 @@ def repair_node(state: AgentState):
     except Exception as exc:
         logger.exception("Repair node failed")
         raise RuntimeError(f"Repair node failed: {exc}") from exc
+
+
+async def research_node(state: AgentState):
+    try:
+        print("[agent] research: started", flush=True)
+        agent = ResearchAgent()
+        inspiration = await agent.gather_inspiration(
+            keyword=state.get("selected_style", "minimalism"),
+            animation_goal=state.get("prompt", "")
+        )
+        print(
+            f"[agent] research: completed, got {len(inspiration.get('ui_patterns', []))} patterns",
+            flush=True,
+        )
+        return {
+            "inspiration_data": inspiration,
+        }
+    except Exception as exc:
+        logger.exception("Research node failed")
+        raise RuntimeError(f"Research node failed: {exc}") from exc
+
+
+async def design_node(state: AgentState):
+    try:
+        print("[agent] design: started", flush=True)
+        agent = get_designing_agent()
+        pages = state.get("pages", {}).get("pages", [])
+        design_systems = {}
+        animation_specs = {}
+        page_templates = {}
+        for page in pages:
+            result = await agent.generate_for_page(page)
+            design_systems[page.get("name")] = result.get("design_system")
+            animation_specs[page.get("name")] = result.get("animation_spec")
+            page_templates[page.get("name")] = result.get("page_template")
+        print(f"[agent] design: completed for {len(pages)} pages", flush=True)
+        return {
+            "design_system": design_systems,
+            "animation_spec": animation_specs,
+            "page_templates": page_templates,
+            "current_agent": "design",
+        }
+    except Exception as exc:
+        logger.exception("Design node failed")
+        raise RuntimeError(f"Design node failed: {exc}") from exc
