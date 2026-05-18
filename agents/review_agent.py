@@ -46,10 +46,22 @@ Focus on:
 - broken package structure
 - undeclared local asset references
 
+Assume this stack when shown in the files:
+- Vite
+- React
+- Tailwind CSS v4
+- @tailwindcss/vite
+
+Tailwind v4 notes:
+- `@import "tailwindcss";` inside a CSS file is valid when the project uses the Vite Tailwind plugin.
+- Do not require `tailwind.config.js`, `postcss.config.js`, or `@tailwind` directives unless the shown files clearly need them.
+
 Rules:
 - Return valid JSON only
 - Be conservative
 - Do not invent speculative issues
+- Do not flag issues caused only by truncated file snapshots
+- Do not suggest config/package changes unless the provided file contents show a concrete mismatch
 - If the project is acceptable, return needs_repair=false
 """
 
@@ -68,7 +80,7 @@ def _collect_project_files(files: dict[str, str]) -> dict[str, str]:
 
 def _truncate_content(content: str, limit: int = 1800) -> str:
     normalized = content.strip()
-    return normalized if len(normalized) <= limit else normalized[:limit] + "\n/* truncated for review */"
+    return normalized if len(normalized) <= limit else normalized[:limit]
 
 
 def _build_review_snapshot(state: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
@@ -80,7 +92,7 @@ def _build_review_snapshot(state: dict[str, Any], files: dict[str, str]) -> dict
 
     for path in always_include:
         if path in files:
-            snapshot_files[path] = _truncate_content(files[path], limit=2500)
+            snapshot_files[path] = _truncate_content(files[path], limit=5000)
 
     for page in page_specs:
         page_name = page.get("name", "")
@@ -89,7 +101,7 @@ def _build_review_snapshot(state: dict[str, Any], files: dict[str, str]) -> dict
         component_name = "".join(word.capitalize() for word in page_name.split("_"))
         path = f"src/pages/{component_name}.jsx"
         if path in files:
-            snapshot_files[path] = _truncate_content(files[path], limit=2200)
+            snapshot_files[path] = _truncate_content(files[path], limit=12000)
 
     return {
         "selected_style": state.get("selected_style", "minimalism"),
@@ -243,27 +255,34 @@ def _dedupe_issues(issues: list[dict[str, str]]) -> list[dict[str, str]]:
 
 async def _run_playwright_checks(url: str, state: dict) -> dict:
     """Run Playwright MCP checks for visual and performance validation."""
+    if not url:
+        return {"skipped": True, "reason": "No preview URL provided"}
+
     try:
         tools = await get_tools_for_agent("review")
-        playwright_tool = tools[0] if tools else None
-        if not playwright_tool:
-            logger.error("No Playwright tool found")
+        tool_map = {tool.name: tool for tool in tools}
+        navigate_tool = tool_map.get("browser_navigate")
+        snapshot_tool = tool_map.get("browser_snapshot")
+        console_tool = tool_map.get("browser_console_messages")
+
+        if not navigate_tool:
+            logger.error("No browser_navigate tool found")
             return {}
-        result = await playwright_tool.ainvoke({
-            "url": url,
-            "checks": ["screenshot", "fps", "animation_timing"]
-        })
-        # result may be ToolMessage or dict
-        if isinstance(result, dict):
-            return result
-        else:
-            content = getattr(result, "content", None)
-            if content:
-                try:
-                    import json
-                    return json.loads(content)
-                except Exception:
-                    return {}
+
+        await navigate_tool.ainvoke({"url": url})
+
+        snapshot_result = None
+        console_result = None
+        if snapshot_tool:
+            snapshot_result = await snapshot_tool.ainvoke({"depth": 3, "boxes": False})
+        if console_tool:
+            console_result = await console_tool.ainvoke({"level": "warning"})
+
+        return {
+            "snapshot": snapshot_result,
+            "console": console_result,
+            "issues": [],
+        }
     except Exception as exc:
         logger.error(f"Playwright check failed: {exc}")
     return {}
@@ -279,11 +298,15 @@ def review_project(state: dict[str, Any]) -> dict[str, Any]:
     )
 
     # Run Playwright MCP checks (synchronous wrapper around async function)
-    try:
-        playwright_results = asyncio.run(_run_playwright_checks("file://localhost", state))
-    except Exception as exc:
-        logger.error(f"Playwright check failed: {exc}")
-        playwright_results = {}
+    preview_url = state.get("preview_url")
+    if preview_url:
+        try:
+            playwright_results = asyncio.run(_run_playwright_checks(preview_url, state))
+        except Exception as exc:
+            logger.error(f"Playwright check failed: {exc}")
+            playwright_results = {}
+    else:
+        playwright_results = {"skipped": True, "reason": "No preview URL provided"}
 
     # Merge Playwright issues if any
     if playwright_results.get("issues"):
@@ -314,6 +337,12 @@ Return JSON in this format:
     }}
   ]
 }}
+
+Important:
+- Some file contents may be truncated for length.
+- Do not report malformed syntax if the only evidence is that the snapshot ends abruptly.
+- Only report configuration/package issues when the shown file contents demonstrate a real mismatch.
+- Treat Tailwind v4 with the Vite plugin as valid when you see `@tailwindcss/vite` and `@import "tailwindcss";`.
 """
 
     result = invoke_structured_model(

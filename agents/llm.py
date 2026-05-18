@@ -23,7 +23,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 PLANNING_MODEL = os.getenv("PLANNING_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
-CODE_MODEL = os.getenv("CODE_MODEL", "qwen/qwen2.5-coder-32b-instruct")
+# Keep the code path on an active model by default. The older qwen2.5 coder
+# endpoint is returning HTTP 410 and is no longer usable.
+CODE_MODEL = os.getenv("CODE_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
 DEFAULT_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 RETRY_DELAY_SECONDS = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "2"))
 
