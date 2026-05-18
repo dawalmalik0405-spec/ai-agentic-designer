@@ -7,7 +7,9 @@ Uses NVIDIA NIM LLM for smart filtering and summarization of scraped patterns.
 """
 
 import asyncio
+import json
 import logging
+import re
 from typing import Dict, List, Any
 
 from mcp_tools.initialize_mcps import get_tools_for_agent
@@ -21,62 +23,141 @@ class ResearchAgent:
 
     def __init__(self):
         self._tools_loaded = False
-        self.firecrawl_tool = None
-        self.context7_tool = None
+        self.firecrawl_search_tool = None
+        self.resolve_library_tool = None
+        self.query_docs_tool = None
+
+    @staticmethod
+    def _extract_payload(result: Any) -> Any:
+        if isinstance(result, dict):
+            return result
+
+        content = getattr(result, "content", None)
+        if isinstance(content, list):
+            joined = "\n".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+            content = joined
+
+        if isinstance(content, str):
+            try:
+                return json.loads(content)
+            except Exception:
+                return content
+
+        return result
+
+    @staticmethod
+    def _extract_context7_library_id(payload: Any) -> str | None:
+        candidates: list[str] = []
+
+        if isinstance(payload, str):
+            candidates.append(payload)
+        elif isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, dict) and "text" in item:
+                    candidates.append(str(item["text"]))
+                elif item:
+                    candidates.append(str(item))
+        elif isinstance(payload, dict):
+            for key in ("text", "content", "results", "data"):
+                value = payload.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict) and "text" in item:
+                            candidates.append(str(item["text"]))
+                        elif item:
+                            candidates.append(str(item))
+
+        for candidate in candidates:
+            match = re.search(r"Context7-compatible library ID:\s*(/[^\s]+)", candidate)
+            if match:
+                return match.group(1)
+
+        return None
 
     async def _ensure_tools(self):
         if not self._tools_loaded:
             tools = await get_tools_for_agent("research")
             for t in tools:
-                if "firecrawl" in t.name.lower():
-                    self.firecrawl_tool = t
-                if "context7" in t.name.lower():
-                    self.context7_tool = t
+                if t.name == "firecrawl_search":
+                    self.firecrawl_search_tool = t
+                elif t.name == "resolve-library-id":
+                    self.resolve_library_tool = t
+                elif t.name == "query-docs":
+                    self.query_docs_tool = t
             self._tools_loaded = True
 
     async def _scrape_patterns(self, keyword: str) -> List[str]:
         await self._ensure_tools()
+        if not self.firecrawl_search_tool:
+            logger.error("Firecrawl search tool is unavailable")
+            return []
+
         try:
-            # Use Firecrawl tool via ainvoke
-            result = await self.firecrawl_tool.ainvoke({
-                "url": f"https://awwwards.com/search?q={keyword}",
-                "limit": 10
+            result = await self.firecrawl_search_tool.ainvoke({
+                "query": f"{keyword} website design inspiration",
+                "limit": 5,
+                "sources": [{"type": "web"}],
             })
-            # Adapt result: might be dict or ToolMessage
-            if isinstance(result, dict):
-                return result.get("patterns", [])
+            payload = self._extract_payload(result)
+            if isinstance(payload, dict):
+                candidates = payload.get("data") or payload.get("results") or []
+            elif isinstance(payload, list):
+                candidates = payload
             else:
-                # assume content attribute
-                content = getattr(result, "content", None)
-                if content:
-                    import json
-                    try:
-                        data = json.loads(content)
-                        return data.get("patterns", [])
-                    except Exception:
-                        return []
+                candidates = [payload] if payload else []
+
+            normalized: List[str] = []
+            for item in candidates:
+                if isinstance(item, dict):
+                    title = item.get("title") or item.get("metadata", {}).get("title") or ""
+                    url = item.get("url") or item.get("sourceURL") or ""
+                    snippet = item.get("description") or item.get("markdown") or item.get("content") or ""
+                    text = " | ".join(part for part in [title, snippet, url] if part)
+                    if text:
+                        normalized.append(text)
+                elif item:
+                    normalized.append(str(item))
+            return normalized
         except Exception as exc:
             logger.error(f"Firecrawl scrape failed for keyword '{keyword}': {exc}")
         return []
 
     async def _fetch_library_docs(self, lib_name: str, query: str) -> List[str]:
         await self._ensure_tools()
+        if not self.resolve_library_tool or not self.query_docs_tool:
+            logger.error("Context7 tools are unavailable")
+            return []
+
         try:
-            resp = await self.context7_tool.ainvoke({
+            resolved = await self.resolve_library_tool.ainvoke({
                 "query": query,
-                "libraries": [lib_name]
+                "libraryName": lib_name,
             })
-            if isinstance(resp, dict):
-                return resp.get("results", [])
+            resolved_payload = self._extract_payload(resolved)
+            library_id = self._extract_context7_library_id(resolved_payload)
+
+            if not library_id:
+                logger.error("Context7 failed to resolve library id for %s", lib_name)
+                return []
+
+            resp = await self.query_docs_tool.ainvoke({
+                "libraryId": library_id,
+                "query": query,
+            })
+            payload = self._extract_payload(resp)
+            if isinstance(payload, dict):
+                results = payload.get("results") or payload.get("snippets") or payload.get("data") or []
+            elif isinstance(payload, list):
+                results = payload
             else:
-                content = getattr(resp, "content", None)
-                if content:
-                    import json
-                    try:
-                        data = json.loads(content)
-                        return data.get("results", [])
-                    except Exception:
-                        return []
+                results = [payload] if payload else []
+
+            return [json.dumps(item) if isinstance(item, dict) else str(item) for item in results]
         except Exception as exc:
             logger.error(f"Context7 lookup failed for lib {lib_name}: {exc}")
         return []
