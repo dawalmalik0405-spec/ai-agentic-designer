@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     from .llm import CODE_MODEL, invoke_text_model
@@ -48,6 +49,45 @@ if not logging.getLogger().handlers:
 
 
 class ResearchAgent:
+    PREFERRED_DOMAINS = {
+        "onepagelove.com",
+        "land-book.com",
+        "lapa.ninja",
+        "godly.website",
+        "siteinspire.com",
+        "awwwards.com",
+        "layers.to",
+        "mobbin.com",
+        "uxpilot.ai",
+        "dribbble.com",
+        "behance.net",
+        "figma.com",
+    }
+
+    LOW_SIGNAL_DOMAINS = {
+        "instagram.com",
+        "youtube.com",
+        "youtu.be",
+        "tiktok.com",
+        "facebook.com",
+        "x.com",
+        "twitter.com",
+        "shutterstock.com",
+        "envato.com",
+        "elements.envato.com",
+        "creativefabrica.com",
+        "pinterest.com",
+    }
+
+    MARKETPLACE_HINTS = {
+        "template",
+        "stock",
+        "graphic",
+        "download",
+        "asset",
+        "marketplace",
+    }
+
     def __init__(self):
         self._tools_loaded = False
         self.firecrawl_search_tool = None
@@ -346,6 +386,51 @@ The queries should help retrieve premium references for:
             deduped.append(item)
         return deduped
 
+    @classmethod
+    def _domain_from_url(cls, url: str) -> str:
+        normalized = str(url or "").strip()
+        if not normalized:
+            return ""
+        parsed = urlparse(normalized)
+        return parsed.netloc.lower().removeprefix("www.")
+
+    @classmethod
+    def _reference_score(cls, item: dict[str, str]) -> int:
+        title = cls._normalize_text(item.get("title", "")).lower()
+        snippet = cls._normalize_text(item.get("snippet", "")).lower()
+        domain = cls._domain_from_url(item.get("url", ""))
+
+        score = 0
+
+        if domain in cls.PREFERRED_DOMAINS:
+            score += 6
+        if domain in cls.LOW_SIGNAL_DOMAINS:
+            score -= 6
+
+        if any(token in title for token in ("inspiration", "examples", "showcase", "gallery", "design")):
+            score += 2
+        if any(token in snippet for token in ("layout", "interface", "design style", "glassmorphism", "website")):
+            score += 1
+        if any(token in title or token in snippet for token in cls.MARKETPLACE_HINTS):
+            score -= 3
+        if "pricing" in title or "pricing" in snippet:
+            score += 1
+        if "features" in title or "features" in snippet:
+            score += 1
+
+        return score
+
+    @classmethod
+    def _rank_references(cls, items: list[dict[str, str]]) -> list[dict[str, str]]:
+        return sorted(
+            items,
+            key=lambda item: (
+                cls._reference_score(item),
+                len(cls._normalize_text(item.get("snippet", ""))),
+            ),
+            reverse=True,
+        )
+
     @staticmethod
     def _build_summary(
         selected_style: str,
@@ -450,7 +535,7 @@ Write a concise research summary that captures:
         for query in queries:
             references.extend(await self._search(query))
 
-        references = self._dedupe_references(references)[:8]
+        references = self._rank_references(self._dedupe_references(references))[:8]
         status = "ready" if references else "empty"
         ui_patterns = [
             " | ".join(

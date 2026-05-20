@@ -4,11 +4,12 @@ import * as esbuild from "esbuild-wasm"
 
 let initialized = false
 
-function escapeForTemplateLiteral(value: string): string {
+function escapeForInlineScript(value: string): string {
   return value
-    .replace(/\\/g, "\\\\")
-    .replace(/`/g, "\\`")
-    .replace(/\$\{/g, "\\${")
+    .replace(/<\/script/gi, "<\\/script")
+    .replace(/<!--/g, "<\\!--")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
 }
 
 function toComponentName(fileName: string): string {
@@ -108,7 +109,9 @@ root.render(<App />);
 }
 
 function buildPreviewDocument(compiledScript: string) {
-  const escapedScript = escapeForTemplateLiteral(compiledScript)
+  const escapedScript = escapeForInlineScript(
+    `${compiledScript}\n//# sourceURL=preview-runtime.js`,
+  )
 
   return `
 <!doctype html>
@@ -173,6 +176,12 @@ function buildPreviewDocument(compiledScript: string) {
       window.addEventListener("error", function(event) {
         document.getElementById("root").innerHTML =
           '<pre class="preview-error">' + "Preview runtime error:\\n" + event.message + "\\n" + event.filename + ":" + event.lineno + ":" + event.colno + "</pre>";
+      });
+
+      window.addEventListener("unhandledrejection", function(event) {
+        const reason = event.reason;
+        document.getElementById("root").innerHTML =
+          '<pre class="preview-error">' + "Preview promise rejection:\\n" + String(reason?.stack || reason?.message || reason) + "</pre>";
       });
 
       try {
