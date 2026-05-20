@@ -136,7 +136,7 @@ class SiteSpecification(BaseModel):
 SYSTEM_PROMPT = """
 You are the master website planning agent for a production-grade AI website generator.
 
-You convert a user request into a complete premium multi-page website specification.
+You convert a user request into a complete premium website, app, or tool specification.
 
 Requirements:
 - Think like a senior product designer, creative director, UX architect, and frontend lead.
@@ -148,6 +148,7 @@ Requirements:
 - Every page must include UI sections that a frontend engineer can directly implement.
 - Use section variants that can support premium animation with GSAP, Framer Motion, and React Three Fiber when appropriate.
 - Keep the page count practical for an MVP, usually 3 to 8 pages.
+- If the request is for a tool, calculator, editor, dashboard, game, or utility, prioritize the actual usable interface over marketing pages.
 - Use snake_case names for page names and section types.
 - Home page route must be "/".
 - Other routes must begin with "/".
@@ -278,49 +279,7 @@ def _normalize_site_spec(spec: SiteSpecification) -> SiteSpecification:
         )
 
     if not normalized_pages:
-        normalized_pages = [
-            PlannedPage(
-                name="home",
-                route="/",
-                type="marketing",
-                goal="convert visitors with a premium landing experience",
-                sections=["navbar", "hero", "features", "cta", "footer"],
-                ui_sections=[
-                    UISection(
-                        type="navbar",
-                        variant="glass_sticky",
-                        layout="horizontal",
-                        motion="fade_down",
-                    ),
-                    UISection(
-                        type="hero",
-                        variant="split_with_3d_visual",
-                        layout="two_column",
-                        motion="stagger_reveal",
-                    ),
-                    UISection(
-                        type="features",
-                        variant="bento_grid",
-                        layout="grid",
-                        motion="cascade_cards",
-                    ),
-                    UISection(
-                        type="cta",
-                        variant="centered_glow_panel",
-                        layout="stack",
-                        motion="scale_in",
-                    ),
-                    UISection(
-                        type="footer",
-                        variant="multi_column",
-                        layout="grid",
-                        motion="fade_up",
-                    ),
-                ],
-                image_prompt="premium futuristic hero render with editorial lighting and immersive product atmosphere",
-                requires_generated_visual=True,
-            )
-        ]
+        raise ValueError("Planner returned no usable pages")
 
     spec.pages = normalized_pages
     return spec
@@ -376,9 +335,241 @@ def _site_spec_to_state(spec: SiteSpecification) -> dict[str, Any]:
     }
 
 
+def _fallback_palette(style: str) -> Palette:
+    palettes = {
+        "glassmorphism": Palette(
+            primary="#22d3ee",
+            secondary="#818cf8",
+            accent="#d3ff72",
+            background="#020617",
+            surface="rgba(15, 23, 42, 0.72)",
+            text="#f8fafc",
+        ),
+        "skeuomorphism": Palette(
+            primary="#58c7f3",
+            secondary="#d6c7ad",
+            accent="#f3d27a",
+            background="#07111f",
+            surface="#111827",
+            text="#f8fafc",
+        ),
+        "claymorphism": Palette(
+            primary="#fb7185",
+            secondary="#93c5fd",
+            accent="#fde68a",
+            background="#fff7ed",
+            surface="#fed7aa",
+            text="#1f2937",
+        ),
+        "minimalism": Palette(
+            primary="#111827",
+            secondary="#6b7280",
+            accent="#2563eb",
+            background="#f8fafc",
+            surface="#ffffff",
+            text="#111827",
+        ),
+        "liquid_glass": Palette(
+            primary="#7dd3fc",
+            secondary="#c084fc",
+            accent="#f0abfc",
+            background="#030712",
+            surface="rgba(17, 24, 39, 0.68)",
+            text="#f9fafb",
+        ),
+        "neo_brutalism": Palette(
+            primary="#0f172a",
+            secondary="#f97316",
+            accent="#facc15",
+            background="#f8fafc",
+            surface="#ffffff",
+            text="#0f172a",
+        ),
+    }
+    return palettes[style]
+
+
+def _fallback_site_spec(prompt: str, selected_style: str) -> SiteSpecification:
+    style_guidance = STYLE_GUIDANCE[selected_style]
+    palette = _fallback_palette(selected_style)
+
+    prompt_lower = prompt.lower()
+    is_calculator = any(
+        token in prompt_lower
+        for token in ["calculator", "calculation", "calculate", "calculations"]
+    )
+
+    if is_calculator:
+        pages = [
+            PlannedPage(
+                name="calculator",
+                route="/",
+                type="tool",
+                goal="provide a usable calculator interface for common calculations",
+                sections=[
+                    "calculator_workspace",
+                    "calculation_modes",
+                    "history",
+                    "reference",
+                    "settings",
+                ],
+                ui_sections=[
+                    UISection(
+                        type="calculator_workspace",
+                        variant=f"{selected_style}_scientific_calculator",
+                        layout="split_tool_surface",
+                        motion="tactile_press_feedback",
+                    ),
+                    UISection(
+                        type="calculation_modes",
+                        variant="mode_tabs",
+                        layout="horizontal",
+                        motion="fade_up",
+                    ),
+                    UISection(
+                        type="history",
+                        variant="calculation_tape",
+                        layout="side_panel",
+                        motion="slide_in",
+                    ),
+                    UISection(
+                        type="reference",
+                        variant="formula_shortcuts",
+                        layout="grid",
+                        motion="cascade_cards",
+                    ),
+                    UISection(
+                        type="settings",
+                        variant="precision_controls",
+                        layout="compact_panel",
+                        motion="fade_up",
+                    ),
+                ],
+                image_prompt="",
+                requires_generated_visual=False,
+            )
+        ]
+
+        return SiteSpecification(
+            plan=SitePlan(
+                page_groups=PageGroups(
+                    dashboard_pages=["calculator"],
+                ),
+                style=selected_style,
+                layout={page.name: page.sections for page in pages},
+                assets=["self-contained calculator UI", "inline icons", "tailwind utilities"],
+            ),
+            design=DesignSystem(
+                style_family=selected_style,
+                mode="dark" if selected_style not in {"minimalism", "neo_brutalism", "claymorphism"} else "light",
+                brand_mood=["precise", "usable", "tactile"],
+                palette=palette,
+                typography=Typography(heading="Inter, ui-sans-serif", body="Inter, ui-sans-serif"),
+                spacing=[3, 4, 6, 8, 12, 16],
+                radius=[4, 8, 12, 18],
+                shadows="tactile control depth with clear pressed and idle states",
+                surface_style=style_guidance["visuals"],
+                motion=style_guidance["motion"],
+                assets=AssetDirection(
+                    icons="inline calculator and operation symbols",
+                    hero="not needed for the tool interface",
+                    background="subtle workspace background that does not distract from controls",
+                ),
+            ),
+            pages=pages,
+        )
+
+    pages = [
+        PlannedPage(
+            name="home",
+            route="/",
+            type="marketing",
+            goal="present the core offer and convert visitors",
+            sections=["navbar", "hero", "features", "cta", "footer"],
+            ui_sections=[
+                UISection(type="navbar", variant=f"{selected_style}_nav", layout="horizontal", motion="fade_down"),
+                UISection(type="hero", variant=f"{selected_style}_hero", layout="centered", motion="stagger_reveal"),
+                UISection(type="features", variant="bento_grid", layout="grid", motion="cascade_cards"),
+                UISection(type="cta", variant="focused_panel", layout="stack", motion="scale_in"),
+                UISection(type="footer", variant="compact", layout="horizontal", motion="fade_up"),
+            ],
+            image_prompt=f"{prompt}, premium {selected_style} hero visual",
+            requires_generated_visual=True,
+        ),
+        PlannedPage(
+            name="technology",
+            route="/technology",
+            type="marketing",
+            goal="explain the product technology and differentiators",
+            sections=["navbar", "hero", "capabilities", "process", "footer"],
+            ui_sections=[
+                UISection(type="navbar", variant=f"{selected_style}_nav", layout="horizontal", motion="fade_down"),
+                UISection(type="hero", variant="technical_intro", layout="two_column", motion="fade_up"),
+                UISection(type="capabilities", variant="feature_matrix", layout="grid", motion="cascade_cards"),
+                UISection(type="process", variant="timeline", layout="stack", motion="stagger_reveal"),
+                UISection(type="footer", variant="compact", layout="horizontal", motion="fade_up"),
+            ],
+            image_prompt=f"{prompt}, product technology interface",
+            requires_generated_visual=True,
+        ),
+        PlannedPage(
+            name="pricing",
+            route="/pricing",
+            type="marketing",
+            goal="compare plans and drive signup",
+            sections=["navbar", "hero", "pricing_cards", "faq", "footer"],
+            ui_sections=[
+                UISection(type="navbar", variant=f"{selected_style}_nav", layout="horizontal", motion="fade_down"),
+                UISection(type="hero", variant="pricing_intro", layout="centered", motion="fade_up"),
+                UISection(type="pricing_cards", variant="three_tier", layout="grid", motion="cascade_cards"),
+                UISection(type="faq", variant="accordion_style", layout="stack", motion="fade_up"),
+                UISection(type="footer", variant="compact", layout="horizontal", motion="fade_up"),
+            ],
+            image_prompt=f"{prompt}, premium pricing page background",
+            requires_generated_visual=False,
+        ),
+    ]
+
+    return SiteSpecification(
+        plan=SitePlan(
+            page_groups=PageGroups(
+                marketing_pages=["home", "technology", "pricing"],
+            ),
+            style=selected_style,
+            layout={page.name: page.sections for page in pages},
+            assets=["self-contained jsx", "tailwind utilities", "inline visual treatments"],
+        ),
+        design=DesignSystem(
+            style_family=selected_style,
+            mode="dark" if selected_style not in {"minimalism", "neo_brutalism", "claymorphism"} else "light",
+            brand_mood=["premium", "focused", "modern"],
+            palette=palette,
+            typography=Typography(heading="Inter, ui-sans-serif", body="Inter, ui-sans-serif"),
+            spacing=[4, 6, 8, 12, 16, 24],
+            radius=[4, 8, 16, 24],
+            shadows="style-specific depth with restrained premium contrast",
+            surface_style=style_guidance["visuals"],
+            motion=style_guidance["motion"],
+            assets=AssetDirection(
+                icons="inline geometric icons",
+                hero="self-contained generated visual treatment",
+                background="CSS gradients, grids, and layered surfaces",
+            ),
+        ),
+        pages=pages,
+    )
+
+
 def planner(prompt: str, selected_style: str) -> dict[str, Any]:
     normalized_style = _normalize_selected_style(selected_style)
     style_guidance = STYLE_GUIDANCE[normalized_style]
+
+    planner_mode = os.getenv("PLANNER_MODE", "llm").strip().lower()
+    if planner_mode in {"fallback", "static", "deterministic"}:
+        logger.info("Using deterministic planner fallback")
+        state_payload = _site_spec_to_state(_fallback_site_spec(prompt, normalized_style))
+        state_payload["plan"]["style"] = normalized_style
+        return state_payload
 
     planning_prompt = f"""
 User Request:
@@ -411,14 +602,21 @@ Rules:
 - For trust-heavy categories like finance, law, healthcare, or B2B enterprise, keep the design more restrained and trustworthy.
 """
 
-    spec = invoke_structured_model(
-        prompt=planning_prompt,
-        schema=SiteSpecification,
-        system_prompt=SYSTEM_PROMPT,
-        model_name=PLANNING_MODEL,
-        temperature=0.3,
-        max_attempts=3,
-    )
+    try:
+        spec = invoke_structured_model(
+            prompt=planning_prompt,
+            schema=SiteSpecification,
+            system_prompt=SYSTEM_PROMPT,
+            model_name=PLANNING_MODEL,
+            temperature=0.3,
+            max_attempts=1,
+            max_completion_tokens=4096,
+        )
+    except Exception as exc:
+        if os.getenv("ALLOW_PLANNER_FALLBACK", "false").lower() not in {"1", "true", "yes", "on"}:
+            raise
+        logger.warning("Planner LLM failed; using deterministic fallback: %s", exc)
+        spec = _fallback_site_spec(prompt, normalized_style)
 
     logger.info("Merged planning spec generated with %s pages", len(spec.pages))
     state_payload = _site_spec_to_state(spec)

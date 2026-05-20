@@ -30,10 +30,8 @@ function createMessage(role: Message["role"], text: string): Message {
 }
 
 export default function ChatPanel({ meta, onGenerated }: Props) {
-  const [messages, setMessages] = useState<Message[]>([
-    createMessage("system", "Backend ready. Choose a design style and submit a prompt to generate a website.")
-  ])
-  const [input, setInput] = useState("Create futuristic AI startup website")
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState("")
   const [selectedStyle, setSelectedStyle] = useState("")
   const [loading, setLoading] = useState(false)
 

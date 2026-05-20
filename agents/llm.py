@@ -31,8 +31,8 @@ RETRY_DELAY_SECONDS = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "2"))
 
 PLANNING_TOP_P = float(os.getenv("PLANNING_TOP_P", "0.95"))
 CODE_TOP_P = float(os.getenv("CODE_TOP_P", "0.95"))
-PLANNING_MAX_TOKENS = int(os.getenv("PLANNING_MAX_TOKENS", "16384"))
-CODE_MAX_TOKENS = int(os.getenv("CODE_MAX_TOKENS", "16384"))
+PLANNING_MAX_TOKENS = int(os.getenv("PLANNING_MAX_TOKENS", "4096"))
+CODE_MAX_TOKENS = int(os.getenv("CODE_MAX_TOKENS", "8192"))
 PLANNING_REASONING = os.getenv("PLANNING_REASONING", "true").lower() in {
     "1",
     "true",
@@ -327,6 +327,8 @@ def invoke_structured_model(
     last_error: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
+        should_attempt_repair = False
+
         try:
             print(f"[llm] structured json attempt {attempt}/{max_attempts}: started", flush=True)
             raw_response = _invoke_with_retries(lambda: model.invoke(base_messages))
@@ -337,6 +339,7 @@ def invoke_structured_model(
 
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError) as exc:
             last_error = exc
+            should_attempt_repair = True
             print(f"[llm] structured json attempt {attempt}/{max_attempts}: invalid ({exc})", flush=True)
             logger.warning(
                 "Structured JSON parse failed on attempt %s/%s: %s",
@@ -353,6 +356,12 @@ def invoke_structured_model(
                 max_attempts,
                 exc,
             )
+            raise RuntimeError(
+                f"Structured model request failed before JSON parsing: {exc}"
+            ) from exc
+
+        if not should_attempt_repair:
+            continue
 
         repair_messages = []
         if system_prompt:

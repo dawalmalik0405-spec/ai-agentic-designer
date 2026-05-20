@@ -8,10 +8,6 @@ interface Props {
 
 type ViewMode = "preview" | "code"
 
-function toComponentName(fileName: string): string {
-  return fileName.split("/").pop()?.replace(/\.jsx$/, "") || "Page"
-}
-
 function removeImports(code: string): string {
   return code
     .replace(/import\s+\{[^}]*\}\s+from\s+["']react["'];?\s*/g, "")
@@ -20,38 +16,27 @@ function removeImports(code: string): string {
     .replace(/import\s+[^;]+;?\s*/g, "")
 }
 
-function transformComponentCode(code: string): string {
-  return removeImports(code)
-    .replace(/export\s+default\s+function\s+(\w+)/g, "function $1")
-    .replace(/export\s+default\s+(\w+);?/g, "")
+function toComponentName(fileName: string): string {
+  return fileName.split("/").pop()?.replace(/\.jsx$/, "") || "Page"
 }
 
-function transformAppCode(appCode: string, pageFiles: string[]): string {
-  const routeEntries = pageFiles
-    .map((fileName) => {
-      const componentName = toComponentName(fileName)
-      const route =
-        componentName === "Home"
-          ? "/"
-          : `/${componentName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`
-      return `"${route}": ${componentName}`
-    })
-    .join(",\n  ")
+function transformComponentCode(fileName: string, code: string): string {
+  const componentName = toComponentName(fileName)
+  const cleaned = removeImports(code)
+    .replace(/export\s+default\s+function\s+(\w+)/g, "function $1")
+    .replace(/export\s+default\s+(\w+);?/g, "")
 
-  const navigationEntries = pageFiles
-    .map((fileName) => {
-      const componentName = toComponentName(fileName)
-      const route =
-        componentName === "Home"
-          ? "/"
-          : `/${componentName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`
-      return `{ route: "${route}", label: "${componentName.replace(/([a-z])([A-Z])/g, "$1 $2")}" }`
-    })
-    .join(", ")
+  return `
+const ${componentName} = (() => {
+${cleaned}
 
+  return ${componentName};
+})();
+`
+}
+
+function transformAppCode(appCode: string): string {
   const cleaned = removeImports(appCode)
-    .replace(/const\s+routes\s*=\s*\{[\s\S]*?\};/, `const routes = {\n  ${routeEntries}\n};`)
-    .replace(/const\s+navigation\s*=\s*\[[\s\S]*?\];/, `const navigation = [${navigationEntries}];`)
     .replace(/export\s+default\s+function\s+App/g, "function App")
     .replace(/export\s+default\s+App;?/g, "")
 
@@ -64,11 +49,21 @@ function buildPreviewHtml(files: GeneratedFiles): string {
     files["App.jsx"] ||
     "function App(){ return <div>No App.jsx generated</div> }"
   const pageFiles = Object.keys(files).filter((name) => name.startsWith("src/pages/") && name.endsWith(".jsx"))
-  const pageCode = pageFiles.map((name) => transformComponentCode(files[name])).join("\n\n")
-  const runtimeAppCode = transformAppCode(appCode, pageFiles)
+  const pageCode = pageFiles.map((name) => transformComponentCode(name, files[name])).join("\n\n")
+  const runtimeAppCode = transformAppCode(appCode)
 
   const script = `
-const { useEffect, useState, useMemo, useRef } = React;
+const {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} = React;
 
 ${pageCode}
 
@@ -206,7 +201,7 @@ export default function PreviewPanel({ files, meta }: Props) {
             key={fileNames.join("|")}
             title="Generated website preview"
             srcDoc={previewHtml}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             className="h-full w-full border-0 bg-white"
           />
         )}

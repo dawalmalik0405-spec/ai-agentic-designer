@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import re
+import subprocess
 
 try:
     from .llm import CODE_MODEL, invoke_text_model_async
@@ -10,10 +12,12 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(__file__))
+FRONTEND_DIR = os.path.join(PACKAGE_ROOT, "frontend")
 
 
 SYSTEM_PROMPT = """
-You are a senior frontend engineer building premium production-grade React + Tailwind websites.
+You are a senior frontend engineer building premium production-grade React + Tailwind websites, apps, tools, and utilities.
 
 You write:
 - clean React function components
@@ -30,6 +34,8 @@ Quality rules:
 - Build a polished visual hierarchy
 - Match the supplied design system exactly
 - Keep components self-contained
+- If the request is for a calculator, editor, dashboard, game, or utility, build the actual usable interface as the primary screen
+- Never recreate the surrounding generator app UI, chat panel, preview panel, style selector, or file/status counters
 - Prefer a minimal React + Tailwind runtime with no required external packages unless absolutely necessary
 - Add animation-ready structure inspired by GSAP, Framer Motion, and React Three Fiber patterns
 - If the concept strongly benefits from advanced animation, introduce it carefully and only when the component still remains buildable
@@ -38,11 +44,53 @@ Quality rules:
 - Do not reference undeclared local asset files
 - Do not use /assets/*, /public/*, root-relative media files, or local .svg/.png/.jpg/.mp4/.webm paths
 - Use CSS gradients, inline SVG, and pure JSX/Tailwind structure instead of file-based media
+- Do not use emoji glyphs or non-ASCII decorative symbols; use inline SVG or text labels instead
 """
 
 
 def _strip_code_fences(code: str) -> str:
     return re.sub(r"```(?:jsx|javascript|js)?|```", "", code).strip()
+
+
+def _validate_jsx_syntax(path: str, code: str) -> None:
+    parser_dir = FRONTEND_DIR
+    if not os.path.isdir(os.path.join(parser_dir, "node_modules", "@babel", "parser")):
+        logger.warning("Skipping JSX syntax validation; @babel/parser is not installed")
+        return
+
+    parser_script = """
+const parser = require("@babel/parser");
+let source = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => source += chunk);
+process.stdin.on("end", () => {
+  try {
+    parser.parse(source, {
+      sourceType: "module",
+      plugins: ["jsx"],
+      errorRecovery: false
+    });
+  } catch (error) {
+    console.error(`${error.message}`);
+    process.exit(1);
+  }
+});
+"""
+
+    result = subprocess.run(
+        ["node", "-e", parser_script],
+        input=code,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        cwd=parser_dir,
+        timeout=20,
+        check=False,
+    )
+
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "Unknown JSX syntax error"
+        raise ValueError(f"{path}: {message}")
 
 
 def _component_name(page_name: str) -> str:
@@ -132,30 +180,15 @@ def _normalize_page_specs(state: dict) -> list[dict]:
 def _build_app_shell(page_specs: list[dict], design: dict, brand_label: str) -> str:
     imports = []
     route_entries = []
-    nav_links = []
 
     for page in page_specs:
         component_name = _component_name(page["name"])
         route = page.get("route", "/")
-        label = page["name"].replace("_", " ").title()
         imports.append(f'import {component_name} from "./pages/{component_name}";')
         route_entries.append(f'  "{route}": {component_name},')
-        nav_links.append(
-            "{ route: "
-            + json.dumps(route)
-            + f', label: "{label}"'
-            + " }"
-        )
 
     background = design.get("palette", {}).get("background", "#020617")
     text = design.get("palette", {}).get("text", "#f8fafc")
-    accent = design.get("palette", {}).get("accent", "#22d3ee")
-
-    active_class = (
-        'route === item.route '
-        '? "rounded-full px-4 py-2 transition bg-white/12 text-white" '
-        ': "rounded-full px-4 py-2 transition hover:bg-white/8 hover:text-white"'
-    )
 
     return f"""
 import {{ useEffect, useState }} from "react";
@@ -164,8 +197,6 @@ import {{ useEffect, useState }} from "react";
 const routes = {{
 {chr(10).join(route_entries)}
 }};
-
-const navigation = [{", ".join(nav_links)}];
 
 function getCurrentRoute() {{
   const hash = window.location.hash.replace(/^#/, "") || "/";
@@ -185,30 +216,6 @@ export default function App() {{
 
   return (
     <div className="min-h-screen" style={{{{ background: "{background}", color: "{text}" }}}}>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <button
-            type="button"
-            onClick={{() => setRoute("/")}}
-            className="text-sm font-semibold uppercase tracking-[0.35em]"
-            style={{{{ color: "{accent}" }}}}
-          >
-            {brand_label}
-          </button>
-          <nav className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-            {{navigation.map((item) => (
-              <button
-                type="button"
-                key={{item.route}}
-                onClick={{() => setRoute(item.route)}}
-                className={{{active_class}}}
-              >
-                {{item.label}}
-              </button>
-            ))}}
-          </nav>
-        </div>
-      </header>
       <ActivePage />
     </div>
   );
@@ -373,6 +380,10 @@ Implementation requirements:
 - Component name must be {component_name}
 - Export default component
 - Use the supplied ui_sections exactly and in order
+- Respect the original user request as the primary product requirement
+- If this page type is "tool", "utility", "dashboard", "game", or "app", make it functional and interactive with React state where appropriate
+- For calculator requests, implement working buttons, numeric input behavior, common operations, result display, clear/delete behavior, and calculation history
+- Do not build or imitate a website-generator interface
 - Make the design visually premium, modern, and polished
 - Create strong motion-ready composition inspired by GSAP, Framer Motion, and React Three Fiber
 - Use tasteful gradients, layered backgrounds, glass, grids, cards, and strong typography when appropriate
@@ -386,18 +397,50 @@ Implementation requirements:
 - Keep the component self-contained
 - Ensure the page feels connected to the other site pages through tone and navigation cues
 - Keep JSX valid and production-lean
+- Before returning, mentally parse the file and ensure every string, array, object, function, JSX tag, and parenthesis is closed
+- Do not place component declarations inside string literals, object string values, array text values, FAQ answers, or copy blocks
+- Do not use emoji glyphs or non-ASCII decorative symbols such as lightning, sparkles, arrows, bullets, or dingbats
 """
 
-    response = await invoke_text_model_async(
-        prompt=code_prompt,
-        system_prompt=SYSTEM_PROMPT,
-        model_name=CODE_MODEL,
-        temperature=0.7,
-    )
+    last_error: Exception | None = None
+    code = ""
 
-    code = _strip_code_fences(response)
-    if "export default function" not in code and "export default" not in code:
-        raise ValueError(f"Model did not return a default export for {component_name}")
+    for attempt in range(1, 3):
+        prompt_for_attempt = code_prompt
+        if last_error is not None:
+            prompt_for_attempt = f"""
+The previous generated file for {component_name} was invalid.
+
+Syntax/validation error:
+{last_error}
+
+Previous invalid code:
+{code}
+
+Return the corrected full React component file only.
+No markdown. No explanations. Ensure valid JSX syntax.
+"""
+
+        response = await invoke_text_model_async(
+            prompt=prompt_for_attempt,
+            system_prompt=SYSTEM_PROMPT,
+            model_name=CODE_MODEL,
+            temperature=0.5 if attempt > 1 else 0.7,
+        )
+
+        code = _strip_code_fences(response)
+        try:
+            if "export default function" not in code and "export default" not in code:
+                raise ValueError(f"Model did not return a default export for {component_name}")
+            _validate_jsx_syntax(f"{component_name}.jsx", code)
+            last_error = None
+            break
+        except Exception as exc:
+            last_error = exc
+            print(f"[code] {component_name}: validation failed on attempt {attempt} ({exc})", flush=True)
+
+    if last_error is not None:
+        raise ValueError(f"Generated invalid JSX for {component_name}: {last_error}")
 
     print(f"[code] {component_name}: generation completed", flush=True)
     return f"{component_name}.jsx", code
