@@ -8,6 +8,7 @@ class AgentState(TypedDict, total=False):
     design: dict
     pages: dict
     ui: dict
+    inspiration_data: dict
     files: dict
     current_agent: str
     is_complete: bool

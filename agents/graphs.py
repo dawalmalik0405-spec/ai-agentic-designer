@@ -1,17 +1,19 @@
 from langgraph.graph import StateGraph
 
 from agents.state import AgentState
-from node.nodes import code_node, planner_node
+from node.nodes import code_node, planner_node, research_node
 
 
 def create_agent_graph():
     workflow = StateGraph(AgentState)
 
     workflow.add_node("plan", planner_node)
+    workflow.add_node("research", research_node)
     workflow.add_node("code", code_node)
 
     workflow.set_entry_point("plan")
-    workflow.add_edge("plan", "code")
+    workflow.add_edge("plan", "research")
+    workflow.add_edge("research", "code")
 
     return workflow.compile()
 
