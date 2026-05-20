@@ -2,6 +2,7 @@ import logging
 
 from agents.code_agent import generate_code
 from agents.planner_agent import planner
+from agents.research_agent import ResearchAgent
 from agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -46,3 +47,29 @@ def code_node(state: AgentState):
     except Exception as exc:
         logger.exception("Code node failed")
         raise RuntimeError(f"Code node failed: {exc}") from exc
+
+
+async def research_node(state: AgentState):
+    try:
+        print("[agent] research: started", flush=True)
+        selected_style = str(state.get("selected_style", "")).strip()
+        if not selected_style:
+            raise ValueError("selected_style is required")
+
+        agent = ResearchAgent()
+        inspiration = await agent.gather_inspiration(
+            prompt=state.get("prompt", ""),
+            selected_style=selected_style,
+            pages=state.get("pages", {}).get("pages", []),
+        )
+        reference_count = len(inspiration.get("references", []))
+        print(f"[agent] research: completed ({reference_count} references)", flush=True)
+        logger.info("Research node completed")
+        return {
+            "inspiration_data": inspiration,
+            "current_agent": "research",
+            "is_complete": False,
+        }
+    except Exception as exc:
+        logger.exception("Research node failed")
+        raise RuntimeError(f"Research node failed: {exc}") from exc

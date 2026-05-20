@@ -31,7 +31,7 @@ export const usePreviewStore = create<PreviewState>((set) => ({
   buildStatus: "idle",
   buildError: "",
   lastPrompt: "",
-  setFiles: (files, prompt) =>
+  setFiles: (files: GeneratedFiles, prompt: string) =>
     set(() => {
       const fileNames = Object.keys(files)
       const nextSelectedFile = fileNames.includes(DEFAULT_SELECTED_FILE)
@@ -45,16 +45,16 @@ export const usePreviewStore = create<PreviewState>((set) => ({
         buildError: "",
       }
     }),
-  updateFile: (path, content) =>
-    set((state) => ({
+  updateFile: (path: string, content: string) =>
+    set((state: PreviewState) => ({
       files: {
         ...state.files,
         [path]: content,
       },
     })),
-  setSelectedFile: (path) => set({ selectedFile: path }),
-  setView: (view) => set({ view }),
-  setPreviewHtml: (html) => set({ previewHtml: html }),
-  setBuildStatus: (status) => set({ buildStatus: status }),
-  setBuildError: (error) => set({ buildError: error }),
+  setSelectedFile: (path: string) => set({ selectedFile: path }),
+  setView: (view: ViewMode) => set({ view }),
+  setPreviewHtml: (html: string) => set({ previewHtml: html }),
+  setBuildStatus: (status: BuildStatus) => set({ buildStatus: status }),
+  setBuildError: (error: string) => set({ buildError: error }),
 }))

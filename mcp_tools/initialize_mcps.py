@@ -179,15 +179,18 @@ class MCPManager:
             return self._all_tools
 
         all_tools: List[StructuredTool] = []
+        had_failures = False
         for server_name, server in self.servers.items():
             try:
                 tools = await server.get_tools()
                 all_tools.extend(tools)
                 logger.info(f"Loaded {len(tools)} tools from {server_name}")
             except Exception as exc:
+                had_failures = True
                 logger.error(f"Failed to load tools from {server_name}: {exc}")
 
-        self._all_tools = all_tools
+        if not had_failures:
+            self._all_tools = all_tools
         return all_tools
 
     async def test_connectivity(self) -> Dict[str, bool]:
