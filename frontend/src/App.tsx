@@ -13,7 +13,6 @@ export interface GenerationMeta {
 
 export default function App() {
   const setFiles = usePreviewStore((state) => state.setFiles)
-  const files = usePreviewStore((state) => state.files)
   const [meta, setMeta] = useState<GenerationMeta>({
     fileCount: 0,
     pageCount: 0,
@@ -21,7 +20,7 @@ export default function App() {
   })
 
   const handleGenerated = (nextFiles: GeneratedFiles, prompt: string) => {
-    setFiles(nextFiles)
+    setFiles(nextFiles, prompt)
     setMeta({
       fileCount: Object.keys(nextFiles).length,
       pageCount: Object.keys(nextFiles).filter((name) => name.startsWith("src/pages/")).length,

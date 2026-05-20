@@ -49,7 +49,7 @@ async function ensureEsbuild() {
   }
 
   await esbuild.initialize({
-    wasmURL: "https://unpkg.com/esbuild-wasm@0.25.11/esbuild.wasm",
+    wasmURL: "https://unpkg.com/esbuild-wasm@0.25.12/esbuild.wasm",
     worker: true,
   })
   initialized = true

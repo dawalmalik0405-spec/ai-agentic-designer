@@ -161,7 +161,7 @@ export default function PreviewPanel({ meta }: Props) {
                   theme="vs-dark"
                   language={languageForFile(selectedFile)}
                   value={files[selectedFile] || ""}
-                  onChange={(value) => {
+                  onChange={(value: string | undefined) => {
                     if (!selectedFile) return
                     updateFile(selectedFile, value ?? "")
                   }}
