@@ -641,6 +641,7 @@ async def _generate_single_page(
     prompt: str,
     selected_style: str,
     design: dict,
+    inspiration_data: dict,
     page: dict,
     site_context: list[dict],
 ) -> tuple[str, str]:
@@ -653,6 +654,13 @@ User Request:
 
 Selected Design Style:
 {selected_style}
+
+Research Context:
+{json.dumps({
+    "summary": inspiration_data.get("research_summary", ""),
+    "references": inspiration_data.get("references", [])[:4],
+    "queries": inspiration_data.get("queries", []),
+}, indent=2)}
 
 Shared Design System:
 {json.dumps(design, indent=2)}
@@ -744,6 +752,7 @@ def generate_code(state: dict) -> dict:
     if not selected_style:
         raise ValueError("selected_style is required")
     design = state.get("design", {})
+    inspiration_data = state.get("inspiration_data", {})
     page_specs = _normalize_page_specs(state)
     brand_label = _derive_brand_label(prompt)
 
@@ -757,6 +766,7 @@ def generate_code(state: dict) -> dict:
                 prompt=prompt,
                 selected_style=selected_style,
                 design=design,
+                inspiration_data=inspiration_data,
                 page=page,
                 site_context=[
                     {
