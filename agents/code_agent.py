@@ -36,7 +36,7 @@ Quality rules:
 - Keep components self-contained
 - If the request is for a calculator, editor, dashboard, game, or utility, build the actual usable interface as the primary screen
 - Never recreate the surrounding generator app UI, chat panel, preview panel, style selector, or file/status counters
-- Prefer a minimal React + Tailwind runtime with no required external packages unless absolutely necessary
+- You may use framer-motion, gsap, three, @react-three/fiber, @react-three/drei, and lenis when the request benefits from advanced motion or 3D
 - Add animation-ready structure inspired by GSAP, Framer Motion, and React Three Fiber patterns
 - If the concept strongly benefits from advanced animation, introduce it carefully and only when the component still remains buildable
 - Avoid placeholder lorem ipsum
@@ -180,15 +180,25 @@ def _normalize_page_specs(state: dict) -> list[dict]:
 def _build_app_shell(page_specs: list[dict], design: dict, brand_label: str) -> str:
     imports = []
     route_entries = []
+    nav_links = []
 
     for page in page_specs:
         component_name = _component_name(page["name"])
         route = page.get("route", "/")
+        label = page["name"].replace("_", " ").title()
         imports.append(f'import {component_name} from "./pages/{component_name}";')
         route_entries.append(f'  "{route}": {component_name},')
+        nav_links.append(
+            "{ route: "
+            + json.dumps(route)
+            + f', label: "{label}"'
+            + " }"
+        )
 
     background = design.get("palette", {}).get("background", "#020617")
     text = design.get("palette", {}).get("text", "#f8fafc")
+    surface = design.get("palette", {}).get("surface", "rgba(15, 23, 42, 0.72)")
+    accent = design.get("palette", {}).get("accent", "#d3ff72")
 
     return f"""
 import {{ useEffect, useState }} from "react";
@@ -197,6 +207,8 @@ import {{ useEffect, useState }} from "react";
 const routes = {{
 {chr(10).join(route_entries)}
 }};
+
+const navigation = [{", ".join(nav_links)}];
 
 function getCurrentRoute() {{
   const hash = window.location.hash.replace(/^#/, "") || "/";
@@ -216,6 +228,49 @@ export default function App() {{
 
   return (
     <div className="min-h-screen" style={{{{ background: "{background}", color: "{text}" }}}}>
+      {{navigation.length > 1 && (
+        <header
+          className="sticky top-0 z-50 border-b px-5 py-3 backdrop-blur-xl"
+          style={{{{
+            background: "{surface}",
+            borderColor: "rgba(255,255,255,0.12)"
+          }}}}
+        >
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-5">
+            <button
+              type="button"
+              onClick={{() => {{
+                window.location.hash = "/";
+                setRoute("/");
+              }}}}
+              className="text-sm font-semibold uppercase tracking-[0.35em]"
+              style={{{{ color: "{accent}" }}}}
+            >
+              {brand_label}
+            </button>
+            <nav className="flex flex-wrap items-center justify-end gap-2 text-sm">
+              {{navigation.map((item) => (
+                <button
+                  type="button"
+                  key={{item.route}}
+                  onClick={{() => {{
+                    window.location.hash = item.route;
+                    setRoute(item.route);
+                  }}}}
+                  className={{[
+                    "rounded-full px-4 py-2 transition",
+                    route === item.route
+                      ? "bg-white text-slate-950"
+                      : "text-white/75 hover:bg-white/10 hover:text-white"
+                  ].join(" ")}}
+                >
+                  {{item.label}}
+                </button>
+              ))}}
+            </nav>
+          </div>
+        </header>
+      )}}
       <ActivePage />
     </div>
   );
@@ -269,10 +324,16 @@ def _build_package_json() -> str:
             },
             "dependencies": {
                 "@vitejs/plugin-react": "latest",
+                "@react-three/drei": "latest",
+                "@react-three/fiber": "latest",
+                "framer-motion": "latest",
+                "gsap": "latest",
+                "lenis": "latest",
                 "vite": "latest",
                 "typescript": "latest",
                 "react": "latest",
                 "react-dom": "latest",
+                "three": "latest",
                 "tailwindcss": "latest",
                 "@tailwindcss/vite": "latest",
             },
@@ -384,6 +445,9 @@ Implementation requirements:
 - If this page type is "tool", "utility", "dashboard", "game", or "app", make it functional and interactive with React state where appropriate
 - For calculator requests, implement working buttons, numeric input behavior, common operations, result display, clear/delete behavior, and calculation history
 - Do not build or imitate a website-generator interface
+- For multi-page websites, include clear page-level navigation links or calls to action that use the supplied routes
+- When advanced motion or 3D is useful, import and use framer-motion, gsap, three, @react-three/fiber, @react-three/drei, or lenis directly
+- This generated project uses Vite React, not Next.js; implement SEO-friendly semantic React structure instead of Next-specific APIs
 - Make the design visually premium, modern, and polished
 - Create strong motion-ready composition inspired by GSAP, Framer Motion, and React Three Fiber
 - Use tasteful gradients, layered backgrounds, glass, grids, cards, and strong typography when appropriate

@@ -29,6 +29,31 @@ function createMessage(role: Message["role"], text: string): Message {
   }
 }
 
+function formatBackendError(data: unknown): string {
+  if (!data || typeof data !== "object") {
+    return "Generation failed"
+  }
+
+  const detail = "detail" in data ? (data as { detail?: unknown }).detail : undefined
+
+  if (typeof detail === "string") {
+    return detail
+  }
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return String(item)
+        const issue = item as { loc?: unknown[]; msg?: string; type?: string }
+        const field = Array.isArray(issue.loc) ? issue.loc.join(".") : "request"
+        return `${field}: ${issue.msg || issue.type || "Invalid value"}`
+      })
+      .join("\n")
+  }
+
+  return JSON.stringify(data, null, 2)
+}
+
 export default function ChatPanel({ meta, onGenerated }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
@@ -56,7 +81,7 @@ export default function ChatPanel({ meta, onGenerated }: Props) {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data?.detail || "Generation failed")
+        throw new Error(formatBackendError(data))
       }
 
       const files = data?.result?.files || {}

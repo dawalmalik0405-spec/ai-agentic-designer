@@ -64,6 +64,35 @@ const {
   useRef,
   useState
 } = React;
+const gsap = window.gsap;
+const ScrollTrigger = window.ScrollTrigger;
+const THREE = window.THREE;
+if (gsap && ScrollTrigger && gsap.registerPlugin) {
+  gsap.registerPlugin(ScrollTrigger);
+}
+const motion = new Proxy({}, {
+  get: (_, tag) => tag
+});
+const AnimatePresence = ({ children }) => <Fragment>{children}</Fragment>;
+const useScroll = () => ({ scrollY: { get: () => 0 }, scrollYProgress: { get: () => 0 } });
+const useTransform = (value) => value;
+const useSpring = (value) => value;
+const useMotionValue = (value) => ({ get: () => value, set: () => {} });
+const useInView = () => true;
+const Canvas = ({ children, className, style }) => (
+  <div className={className} style={style}>{children}</div>
+);
+const useFrame = () => {};
+const OrbitControls = () => null;
+const PerspectiveCamera = () => null;
+const Environment = () => null;
+const Float = ({ children }) => <Fragment>{children}</Fragment>;
+class Lenis {
+  raf() {}
+  on() {}
+  off() {}
+  destroy() {}
+}
 
 ${pageCode}
 
@@ -80,6 +109,9 @@ root.render(<App />);
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
