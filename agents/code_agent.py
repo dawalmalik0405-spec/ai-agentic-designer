@@ -2,8 +2,10 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import re
 import subprocess
+from pathlib import Path
 
 try:
     from .llm import CODE_MODEL, invoke_text_model_async
@@ -14,6 +16,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(__file__))
 FRONTEND_DIR = os.path.join(PACKAGE_ROOT, "frontend")
+DEFAULT_GENERATED_PROJECT_DIR = os.path.join(PACKAGE_ROOT, ".generated", "latest")
 
 
 SYSTEM_PROMPT = """
@@ -409,6 +412,231 @@ def _package_project_files(files: dict[str, str], design: dict, site_title: str)
     return packaged
 
 
+def _generated_project_validation_enabled() -> bool:
+    return os.getenv("VALIDATE_GENERATED_PROJECT", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _generated_project_repair_attempts() -> int:
+    return max(0, int(os.getenv("GENERATED_PROJECT_REPAIR_ATTEMPTS", "1")))
+
+
+def _generated_project_dir() -> Path:
+    configured = os.getenv("GENERATED_PROJECT_DIR", DEFAULT_GENERATED_PROJECT_DIR)
+    path = Path(configured).resolve()
+    allowed_roots = [Path(PACKAGE_ROOT).resolve(), Path(r"C:\tmp").resolve()]
+
+    if not any(allowed_root in [path, *path.parents] for allowed_root in allowed_roots):
+        raise ValueError(
+            "GENERATED_PROJECT_DIR must stay inside one of "
+            + ", ".join(str(root) for root in allowed_roots)
+            + f"; got {path}"
+        )
+
+    return path
+
+
+def _write_generated_project(files: dict[str, str], target_dir: Path) -> None:
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for relative_path, content in files.items():
+        destination = (target_dir / relative_path).resolve()
+        if target_dir not in [destination, *destination.parents]:
+            raise ValueError(f"Refusing to write outside generated project: {relative_path}")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+
+
+def _run_project_command(command: list[str], cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=str(cwd),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+
+
+def _format_command_output(result: subprocess.CompletedProcess[str], limit: int = 12000) -> str:
+    output = "\n".join(
+        part
+        for part in [
+            f"command: {' '.join(result.args) if isinstance(result.args, list) else result.args}",
+            f"exit_code: {result.returncode}",
+            result.stdout.strip(),
+            result.stderr.strip(),
+        ]
+        if part
+    )
+    return output[-limit:]
+
+
+def _validate_generated_project_build(files: dict[str, str]) -> tuple[bool, str]:
+    target_dir = _generated_project_dir()
+    print(f"[validate] writing generated project: {target_dir}", flush=True)
+    _write_generated_project(files=files, target_dir=target_dir)
+
+    install_timeout = int(os.getenv("GENERATED_PROJECT_INSTALL_TIMEOUT_SECONDS", "180"))
+    build_timeout = int(os.getenv("GENERATED_PROJECT_BUILD_TIMEOUT_SECONDS", "120"))
+    npm_command = os.getenv("NPM_COMMAND", "npm.cmd")
+
+    print("[validate] npm install: started", flush=True)
+    install_result = _run_project_command(
+        [npm_command, "install", "--silent", "--no-audit", "--no-fund"],
+        cwd=target_dir,
+        timeout_seconds=install_timeout,
+    )
+    if install_result.returncode != 0:
+        return False, _format_command_output(install_result)
+    print("[validate] npm install: completed", flush=True)
+
+    print("[validate] npm run build: started", flush=True)
+    build_result = _run_project_command(
+        [npm_command, "run", "build"],
+        cwd=target_dir,
+        timeout_seconds=build_timeout,
+    )
+    if build_result.returncode != 0:
+        return False, _format_command_output(build_result)
+    print("[validate] npm run build: completed", flush=True)
+
+    return True, _format_command_output(build_result, limit=4000)
+
+
+def _select_repair_files(files: dict[str, str], build_log: str) -> dict[str, str]:
+    candidates = {
+        path: content
+        for path, content in files.items()
+        if path.endswith((".jsx", ".js", ".css", ".html", ".json"))
+    }
+
+    mentioned = {
+        path: content
+        for path, content in candidates.items()
+        if path in build_log or path.replace("/", "\\") in build_log
+    }
+
+    if mentioned:
+        return mentioned
+
+    fallback_paths = {"src/App.jsx", "src/main.jsx", "src/styles.css", "vite.config.js", "package.json"}
+    return {
+        path: content
+        for path, content in candidates.items()
+        if path in fallback_paths or path.startswith("src/pages/")
+    }
+
+
+async def _repair_generated_project_files(
+    files: dict[str, str],
+    build_log: str,
+    prompt: str,
+    selected_style: str,
+) -> dict[str, str]:
+    repair_files = _select_repair_files(files=files, build_log=build_log)
+
+    repair_prompt = f"""
+User request:
+{prompt}
+
+Selected style:
+{selected_style}
+
+The generated Vite React project failed validation.
+
+Build log:
+{build_log}
+
+Files to repair:
+{json.dumps(repair_files, indent=2)}
+
+Return a JSON object mapping file paths to full corrected file contents.
+Only include files that need changes.
+Do not use markdown fences.
+Keep the existing Vite React project structure.
+Do not remove required pages or routes unless the build log proves they are invalid.
+"""
+
+    response = await invoke_text_model_async(
+        prompt=repair_prompt,
+        system_prompt=(
+            "You are a senior React build repair engineer. "
+            "Return valid JSON only: {\"path\": \"full file content\"}."
+        ),
+        model_name=CODE_MODEL,
+        temperature=0.2,
+    )
+
+    cleaned = _strip_code_fences(response)
+    match = re.search(r"\{[\s\S]*\}", cleaned)
+    if not match:
+        raise ValueError("Repair model did not return a JSON object")
+
+    repaired_payload = json.loads(match.group(0))
+    if not isinstance(repaired_payload, dict):
+        raise ValueError("Repair model returned a non-object JSON payload")
+
+    repaired_files = dict(files)
+    for path, content in repaired_payload.items():
+        if not isinstance(path, str) or not isinstance(content, str):
+            continue
+        if path not in files:
+            logger.warning("Repair returned unknown file path: %s", path)
+            continue
+        repaired_files[path] = _strip_code_fences(content)
+
+    return repaired_files
+
+
+def _validate_and_repair_generated_project(
+    files: dict[str, str],
+    prompt: str,
+    selected_style: str,
+) -> dict[str, str]:
+    if not _generated_project_validation_enabled():
+        return files
+
+    attempts = _generated_project_repair_attempts()
+    current_files = files
+    last_log = ""
+
+    for attempt in range(0, attempts + 1):
+        is_valid, build_log = _validate_generated_project_build(current_files)
+        if is_valid:
+            print("[validate] generated project build passed", flush=True)
+            return current_files
+
+        last_log = build_log
+        print(f"[validate] generated project build failed on attempt {attempt + 1}", flush=True)
+
+        if attempt >= attempts:
+            break
+
+        print(f"[repair] generated project repair attempt {attempt + 1}: started", flush=True)
+        current_files = asyncio.run(
+            _repair_generated_project_files(
+                files=current_files,
+                build_log=build_log,
+                prompt=prompt,
+                selected_style=selected_style,
+            )
+        )
+        print(f"[repair] generated project repair attempt {attempt + 1}: completed", flush=True)
+
+    raise RuntimeError("Generated project build validation failed:\n" + last_log)
+
+
 async def _generate_single_page(
     prompt: str,
     selected_style: str,
@@ -582,5 +810,10 @@ def generate_code(state: dict) -> dict:
     print("[code] project package: building", flush=True)
     files = _package_project_files(files=files, design=design, site_title=brand_label)
     print(f"[code] project package: completed ({len(files)} files)", flush=True)
+    files = _validate_and_repair_generated_project(
+        files=files,
+        prompt=prompt,
+        selected_style=selected_style,
+    )
 
     return {"files": files}

@@ -1,201 +1,89 @@
-import { useEffect, useMemo, useState } from "react"
-import type { GeneratedFiles, GenerationMeta } from "../App"
+import { useEffect, useMemo } from "react"
+import Editor from "@monaco-editor/react"
+
+import type { GenerationMeta } from "../App"
+import { buildPreviewHtml } from "../lib/previewEngine"
+import { usePreviewStore } from "../store/previewStore"
 
 interface Props {
-  files: GeneratedFiles
   meta: GenerationMeta
 }
 
-type ViewMode = "preview" | "code"
-
-function removeImports(code: string): string {
-  return code
-    .replace(/import\s+\{[^}]*\}\s+from\s+["']react["'];?\s*/g, "")
-    .replace(/import\s+React\s+from\s+["']react["'];?\s*/g, "")
-    .replace(/import\s+\w+\s+from\s+["']\.\/pages\/[^"']+["'];?\s*/g, "")
-    .replace(/import\s+[^;]+;?\s*/g, "")
+function languageForFile(path: string): string {
+  if (path.endsWith(".json")) return "json"
+  if (path.endsWith(".css")) return "css"
+  if (path.endsWith(".html")) return "html"
+  if (path.endsWith(".ts") || path.endsWith(".tsx")) return "typescript"
+  return "javascript"
 }
 
-function toComponentName(fileName: string): string {
-  return fileName.split("/").pop()?.replace(/\.jsx$/, "") || "Page"
-}
+export default function PreviewPanel({ meta }: Props) {
+  const {
+    files,
+    selectedFile,
+    view,
+    previewHtml,
+    buildStatus,
+    buildError,
+    setSelectedFile,
+    setView,
+    updateFile,
+    setPreviewHtml,
+    setBuildStatus,
+    setBuildError,
+  } = usePreviewStore((state) => state)
 
-function transformComponentCode(fileName: string, code: string): string {
-  const componentName = toComponentName(fileName)
-  const cleaned = removeImports(code)
-    .replace(/export\s+default\s+function\s+(\w+)/g, "function $1")
-    .replace(/export\s+default\s+(\w+);?/g, "")
-
-  return `
-const ${componentName} = (() => {
-${cleaned}
-
-  return ${componentName};
-})();
-`
-}
-
-function transformAppCode(appCode: string): string {
-  const cleaned = removeImports(appCode)
-    .replace(/export\s+default\s+function\s+App/g, "function App")
-    .replace(/export\s+default\s+App;?/g, "")
-
-  return cleaned
-}
-
-function buildPreviewHtml(files: GeneratedFiles): string {
-  const appCode =
-    files["src/App.jsx"] ||
-    files["App.jsx"] ||
-    "function App(){ return <div>No App.jsx generated</div> }"
-  const pageFiles = Object.keys(files).filter((name) => name.startsWith("src/pages/") && name.endsWith(".jsx"))
-  const pageCode = pageFiles.map((name) => transformComponentCode(name, files[name])).join("\n\n")
-  const runtimeAppCode = transformAppCode(appCode)
-
-  const script = `
-const {
-  Fragment,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState
-} = React;
-const gsap = window.gsap;
-const ScrollTrigger = window.ScrollTrigger;
-const THREE = window.THREE;
-if (gsap && ScrollTrigger && gsap.registerPlugin) {
-  gsap.registerPlugin(ScrollTrigger);
-}
-const motion = new Proxy({}, {
-  get: (_, tag) => tag
-});
-const AnimatePresence = ({ children }) => <Fragment>{children}</Fragment>;
-const useScroll = () => ({ scrollY: { get: () => 0 }, scrollYProgress: { get: () => 0 } });
-const useTransform = (value) => value;
-const useSpring = (value) => value;
-const useMotionValue = (value) => ({ get: () => value, set: () => {} });
-const useInView = () => true;
-const Canvas = ({ children, className, style }) => (
-  <div className={className} style={style}>{children}</div>
-);
-const useFrame = () => {};
-const OrbitControls = () => null;
-const PerspectiveCamera = () => null;
-const Environment = () => null;
-const Float = ({ children }) => <Fragment>{children}</Fragment>;
-class Lenis {
-  raf() {}
-  on() {}
-  off() {}
-  destroy() {}
-}
-
-${pageCode}
-
-${runtimeAppCode}
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
-`
-
-  return `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <style>
-      html, body, #root {
-        min-height: 100%;
-        margin: 0;
-      }
-
-      body {
-        background: #000814;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      .preview-error {
-        min-height: 100vh;
-        background: #140707;
-        color: #ffe8e8;
-        padding: 24px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        white-space: pre-wrap;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script>
-      document.addEventListener("click", function(event) {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        const link = target.closest("a");
-        if (!link) return;
-
-        const href = link.getAttribute("href") || "";
-        if (!href) return;
-
-        if (href.startsWith("#/")) {
-          event.preventDefault();
-          window.location.hash = href.slice(1);
-          return;
-        }
-
-        if (href === "/" || href.startsWith("/")) {
-          event.preventDefault();
-          window.location.hash = href;
-        }
-      });
-
-      window.addEventListener("error", function(event) {
-        document.getElementById("root").innerHTML =
-          '<pre class="preview-error">' + ${JSON.stringify("Preview runtime error:\\n")} + event.message + "\\n" + event.filename + ":" + event.lineno + ":" + event.colno + "</pre>";
-      });
-    </script>
-    <script type="text/babel" data-presets="env,react">
-${script}
-    </script>
-  </body>
-</html>
-`.trim()
-}
-
-export default function PreviewPanel({ files, meta }: Props) {
-  const [view, setView] = useState<ViewMode>("preview")
   const fileNames = useMemo(() => Object.keys(files), [files])
-  const [selectedFile, setSelectedFile] = useState("App.jsx")
   const hasFiles = fileNames.length > 0
-  const previewHtml = useMemo(() => buildPreviewHtml(files), [files])
 
   useEffect(() => {
-    if (!files[selectedFile]) {
-      setSelectedFile(fileNames.includes("App.jsx") ? "App.jsx" : fileNames[0] || "App.jsx")
+    if (!hasFiles) {
+      setPreviewHtml("")
+      setBuildStatus("idle")
+      setBuildError("")
+      return
     }
-  }, [fileNames, files, selectedFile])
+
+    let cancelled = false
+
+    async function runBuild() {
+      setBuildStatus("building")
+      setBuildError("")
+
+      try {
+        const html = await buildPreviewHtml(files)
+        if (cancelled) return
+        setPreviewHtml(html)
+        setBuildStatus("ready")
+      } catch (error) {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : String(error)
+        setPreviewHtml("")
+        setBuildStatus("error")
+        setBuildError(message)
+      }
+    }
+
+    void runBuild()
+
+    return () => {
+      cancelled = true
+    }
+  }, [files, hasFiles, setBuildError, setBuildStatus, setPreviewHtml])
 
   return (
     <section className="min-h-0 min-w-0 bg-[#0d0e11]">
       <header className="flex h-16 items-center justify-between border-b border-[#2a2c31] px-5">
         <div className="min-w-0">
           <div className="truncate text-sm text-[#8f969f]">{meta.lastPrompt || "No generation yet"}</div>
-          <div className="mt-1 text-sm font-medium text-[#f8f4ea]">
-            {hasFiles ? `${meta.fileCount} files ready` : "Preview waiting for generated files"}
+          <div className="mt-1 flex items-center gap-3 text-sm font-medium text-[#f8f4ea]">
+            <span>{hasFiles ? `${meta.fileCount} files ready` : "Preview waiting for generated files"}</span>
+            <span className="text-[#8f969f]">
+              {buildStatus === "building" && "Building preview"}
+              {buildStatus === "ready" && "Preview ready"}
+              {buildStatus === "error" && "Preview failed"}
+              {buildStatus === "idle" && !hasFiles && "Idle"}
+            </span>
           </div>
         </div>
 
@@ -229,13 +117,20 @@ export default function PreviewPanel({ files, meta }: Props) {
         )}
 
         {hasFiles && view === "preview" && (
-          <iframe
-            key={fileNames.join("|")}
-            title="Generated website preview"
-            srcDoc={previewHtml}
-            sandbox="allow-scripts"
-            className="h-full w-full border-0 bg-white"
-          />
+          <>
+            {buildError && (
+              <div className="border-b border-[#4a2525] bg-[#261313] px-4 py-3 text-sm text-[#ffd0d0]">
+                {buildError}
+              </div>
+            )}
+            <iframe
+              key={`${fileNames.join("|")}:${buildStatus}`}
+              title="Generated website preview"
+              srcDoc={previewHtml}
+              sandbox="allow-scripts"
+              className="h-full w-full border-0 bg-white"
+            />
+          </>
         )}
 
         {hasFiles && view === "code" && (
@@ -257,13 +152,28 @@ export default function PreviewPanel({ files, meta }: Props) {
               ))}
             </aside>
 
-            <div className="min-h-0 overflow-auto bg-[#090a0d]">
+            <div className="min-h-0 overflow-hidden bg-[#090a0d]">
               <div className="sticky top-0 border-b border-[#2a2c31] bg-[#111217] px-4 py-3 text-sm text-[#f8f4ea]">
                 {selectedFile}
               </div>
-              <pre className="min-h-full overflow-auto p-5 text-sm leading-6 text-[#d8dce0]">
-                <code>{files[selectedFile] || ""}</code>
-              </pre>
+              <div className="h-[calc(100%-49px)]">
+                <Editor
+                  theme="vs-dark"
+                  language={languageForFile(selectedFile)}
+                  value={files[selectedFile] || ""}
+                  onChange={(value) => {
+                    if (!selectedFile) return
+                    updateFile(selectedFile, value ?? "")
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    smoothScrolling: true,
+                    automaticLayout: true,
+                    wordWrap: "on",
+                  }}
+                />
+              </div>
             </div>
           </div>
         )}
