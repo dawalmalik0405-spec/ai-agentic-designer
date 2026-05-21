@@ -78,9 +78,37 @@ def generate(request: PromptRequest):
 
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend/dist")
 assets_dir = os.path.join(frontend_dist, "assets")
+generated_preview_root = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        os.getenv("GENERATED_PROJECT_DIR", ".generated/latest"),
+        "dist",
+    )
+)
 
 if os.path.isdir(assets_dir):
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+
+@app.get("/generated-preview/{full_path:path}")
+def generated_preview(full_path: str):
+    if not os.path.isdir(generated_preview_root):
+        raise HTTPException(status_code=404, detail="Generated preview build not found")
+
+    requested_path = full_path.strip("/")
+    candidate = os.path.abspath(os.path.join(generated_preview_root, requested_path))
+
+    if not candidate.startswith(generated_preview_root):
+        raise HTTPException(status_code=400, detail="Invalid preview path")
+
+    if requested_path and os.path.isfile(candidate):
+        return FileResponse(candidate)
+
+    index_file = os.path.join(generated_preview_root, "index.html")
+    if not os.path.isfile(index_file):
+        raise HTTPException(status_code=404, detail="Generated preview index not found")
+
+    return FileResponse(index_file)
 
 
 @app.get("/{full_path:path}")
