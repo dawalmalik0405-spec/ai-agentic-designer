@@ -4,10 +4,11 @@ import * as esbuild from "esbuild-wasm"
 
 let initialized = false
 
-function escapeForInlineScript(value: string): string {
+function escapeJsonForHtml(value: string): string {
   return value
-    .replace(/<\/script/gi, "<\\/script")
-    .replace(/<!--/g, "<\\!--")
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029")
 }
@@ -109,9 +110,8 @@ root.render(<App />);
 }
 
 function buildPreviewDocument(compiledScript: string) {
-  const escapedScript = escapeForInlineScript(
-    `${compiledScript}\n//# sourceURL=preview-runtime.js`,
-  )
+  const runtimePayload = JSON.stringify(`${compiledScript}\n//# sourceURL=preview-runtime.js`)
+  const escapedRuntimePayload = escapeJsonForHtml(runtimePayload)
 
   return `
 <!doctype html>
@@ -151,6 +151,7 @@ function buildPreviewDocument(compiledScript: string) {
   </head>
   <body>
     <div id="root"></div>
+    <script id="preview-runtime-data" type="application/json">${escapedRuntimePayload}</script>
     <script>
       document.addEventListener("click", function(event) {
         const target = event.target;
@@ -185,7 +186,21 @@ function buildPreviewDocument(compiledScript: string) {
       });
 
       try {
-        ${escapedScript}
+        const runtimePayloadNode = document.getElementById("preview-runtime-data");
+        const runtimeSource = runtimePayloadNode ? JSON.parse(runtimePayloadNode.textContent || "\"\"") : "";
+        const runtimeBlob = new Blob([runtimeSource], { type: "text/javascript" });
+        const runtimeUrl = URL.createObjectURL(runtimeBlob);
+        const runtimeScript = document.createElement("script");
+        runtimeScript.src = runtimeUrl;
+        runtimeScript.onload = function() {
+          URL.revokeObjectURL(runtimeUrl);
+        };
+        runtimeScript.onerror = function() {
+          document.getElementById("root").innerHTML =
+            '<pre class="preview-error">' + "Preview runtime load error" + "</pre>";
+          URL.revokeObjectURL(runtimeUrl);
+        };
+        document.body.appendChild(runtimeScript);
       } catch (error) {
         document.getElementById("root").innerHTML =
           '<pre class="preview-error">' + "Preview build error:\\n" + String(error?.stack || error?.message || error) + "</pre>";

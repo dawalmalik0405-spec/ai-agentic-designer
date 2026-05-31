@@ -2,7 +2,6 @@ import { useEffect, useMemo } from "react"
 import Editor from "@monaco-editor/react"
 
 import type { GenerationMeta } from "../App"
-import { buildPreviewHtml } from "../lib/previewEngine"
 import { usePreviewStore } from "../store/previewStore"
 
 interface Props {
@@ -22,54 +21,25 @@ export default function PreviewPanel({ meta }: Props) {
     files,
     selectedFile,
     view,
-    previewHtml,
-    buildStatus,
-    buildError,
     setSelectedFile,
     setView,
     updateFile,
-    setPreviewHtml,
-    setBuildStatus,
-    setBuildError,
   } = usePreviewStore((state) => state)
 
   const fileNames = useMemo(() => Object.keys(files), [files])
   const hasFiles = fileNames.length > 0
+  const previewUrl = useMemo(() => {
+    if (!hasFiles) {
+      return ""
+    }
+    return `/generated-preview/?prompt=${encodeURIComponent(meta.lastPrompt)}&files=${meta.fileCount}`
+  }, [hasFiles, meta.fileCount, meta.lastPrompt])
 
   useEffect(() => {
     if (!hasFiles) {
-      setPreviewHtml("")
-      setBuildStatus("idle")
-      setBuildError("")
       return
     }
-
-    let cancelled = false
-
-    async function runBuild() {
-      setBuildStatus("building")
-      setBuildError("")
-
-      try {
-        const html = await buildPreviewHtml(files)
-        if (cancelled) return
-        setPreviewHtml(html)
-        setBuildStatus("ready")
-      } catch (error) {
-        if (cancelled) return
-        const message = error instanceof Error ? error.message : String(error)
-        setPreviewHtml("")
-        setBuildStatus("error")
-        setBuildError(message)
-      }
-    }
-
-    void runBuild()
-
-    return () => {
-      cancelled = true
-    }
-  }, [files, hasFiles, setBuildError, setBuildStatus, setPreviewHtml])
+  }, [hasFiles])
 
   return (
     <section className="min-h-0 min-w-0 bg-[#0d0e11]">
@@ -78,12 +48,7 @@ export default function PreviewPanel({ meta }: Props) {
           <div className="truncate text-sm text-[#8f969f]">{meta.lastPrompt || "No generation yet"}</div>
           <div className="mt-1 flex items-center gap-3 text-sm font-medium text-[#f8f4ea]">
             <span>{hasFiles ? `${meta.fileCount} files ready` : "Preview waiting for generated files"}</span>
-            <span className="text-[#8f969f]">
-              {buildStatus === "building" && "Building preview"}
-              {buildStatus === "ready" && "Preview ready"}
-              {buildStatus === "error" && "Preview failed"}
-              {buildStatus === "idle" && !hasFiles && "Idle"}
-            </span>
+            <span className="text-[#8f969f]">{hasFiles ? "Preview ready" : "Idle"}</span>
           </div>
         </div>
 
@@ -117,20 +82,12 @@ export default function PreviewPanel({ meta }: Props) {
         )}
 
         {hasFiles && view === "preview" && (
-          <>
-            {buildError && (
-              <div className="border-b border-[#4a2525] bg-[#261313] px-4 py-3 text-sm text-[#ffd0d0]">
-                {buildError}
-              </div>
-            )}
-            <iframe
-              key={`${fileNames.join("|")}:${buildStatus}`}
-              title="Generated website preview"
-              srcDoc={previewHtml}
-              sandbox="allow-scripts"
-              className="h-full w-full border-0 bg-white"
-            />
-          </>
+          <iframe
+            key={previewUrl}
+            title="Generated website preview"
+            src={previewUrl}
+            className="h-full w-full border-0 bg-white"
+          />
         )}
 
         {hasFiles && view === "code" && (
