@@ -1,66 +1,30 @@
 """
-MCP Server Initialization for LangChain Agents
-===========================================
-Uses langchain-mcp-adapters for clean MCP-to-LangChain tool conversion.
-All agents get real, connected MCP tools via this manager.
+MCP pipeline helpers built on mcp-use.
+
+Agents create an MCPClient from the shared servers.json config, restrict it to
+the servers they need, and let MCPAgent decide when to call tools.
 """
 
-import asyncio
+import json
 import logging
 import os
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from dotenv import load_dotenv
-from langchain_mcp_adapters.sessions import StdioConnection
-from langchain_mcp_adapters.tools import load_mcp_tools
-from langchain_core.tools import StructuredTool
+from mcp_use import MCPAgent, MCPClient
+
+from agents.llm import CODE_MODEL, deepseek_llm, qwen_llm
 
 CURRENT_DIR = os.path.dirname(__file__)
 PACKAGE_ROOT = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(PACKAGE_ROOT)
+DEFAULT_SERVERS_PATH = os.path.join(CURRENT_DIR, "servers.json")
 
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 load_dotenv(os.path.join(PACKAGE_ROOT, ".env"), override=False)
 load_dotenv()
 
-
-class MCPServerStdio:
-    """Compatibility shim for the old MCPServerStdio API."""
-
-    def __init__(self, command: str, args: list[str], env: dict | None = None):
-        self.config: StdioConnection = {
-            "transport": "stdio",
-            "command": command,
-            "args": args,
-            "env": env or {},
-        }
-
-    async def get_tools(self) -> list:
-        return await load_mcp_tools(session=None, connection=self.config)
-
-
-MCPConfig = dict  # placeholder, not used directly
-
 logger = logging.getLogger(__name__)
-
-RESEARCH_DOC_TOOL_NAMES = {"resolve-library-id", "query-docs"}
-FILESYSTEM_TOOL_NAMES = {
-    "read_file",
-    "read_text_file",
-    "read_media_file",
-    "read_multiple_files",
-    "write_file",
-    "edit_file",
-    "create_directory",
-    "list_directory",
-    "list_directory_with_sizes",
-    "directory_tree",
-    "move_file",
-    "search_files",
-    "get_file_info",
-    "list_allowed_directories",
-}
-BROWSER_TOOL_PREFIX = "browser_"
 
 
 def _filesystem_allowed_directories() -> list[str]:
@@ -84,152 +48,94 @@ def _filesystem_allowed_directories() -> list[str]:
     return normalized
 
 
-class MCPManager:
-    """Manages connections to all MCP servers and exposes tools to agents."""
+def _expand_config_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if value == "${MCP_FILESYSTEM_ROOTS}":
+            return _filesystem_allowed_directories()
 
-    def __init__(self):
-        self.servers = {}
-        self._initialized = False
-        self._tool_cache = {}
-        self._all_tools: Optional[List[StructuredTool]] = None
+        if value.startswith("${") and value.endswith("}"):
+            return os.getenv(value[2:-1], "")
 
-    async def initialize_servers(self):
-        """Initialize all MCP server connections."""
-        if self._initialized:
-            return
+        return value
 
-        # Firecrawl MCP - for web scraping UI patterns
-        self.servers["firecrawl"] = MCPServerStdio(
-            command="npx",
-            args=["-y", "firecrawl-mcp@latest"],
-            env={
-                "FIRECRAWL_API_KEY": os.getenv("FIRECRAWL_API_KEY", ""),
-                "NODE_ENV": "production"
-            }
-        )
+    if isinstance(value, list):
+        expanded: list[Any] = []
+        for item in value:
+            resolved = _expand_config_value(item)
+            if isinstance(resolved, list):
+                expanded.extend(resolved)
+            elif resolved not in (None, ""):
+                expanded.append(resolved)
+        return expanded
 
-        # Context7 MCP - for documentation lookup
-        self.servers["context7"] = MCPServerStdio(
-            command="npx",
-            args=["-y", "@upstash/context7-mcp@latest"],
-            env={}
-        )
+    if isinstance(value, dict):
+        expanded: dict[str, Any] = {}
+        for key, item in value.items():
+            resolved = _expand_config_value(item)
+            if resolved not in (None, ""):
+                expanded[key] = resolved
+        return expanded
 
-        # Filesystem MCP - for file operations
-        filesystem_roots = _filesystem_allowed_directories()
-        self.servers["filesystem"] = MCPServerStdio(
-            command="npx",
-            args=["-y", "@modelcontextprotocol/server-filesystem", *filesystem_roots],
-            env={}
-        )
-
-        # Playwright MCP - for browser testing
-        self.servers["playwright"] = MCPServerStdio(
-            command="npx",
-            args=["-y", "@playwright/mcp@latest"],
-            env={}
-        )
-
-        self._initialized = True
-        logger.info("All MCP servers configured via langchain-mcp-adapters")
-
-    async def get_tools_for_agent(self, agent_type: str) -> List[StructuredTool]:
-        """Get MCP tools filtered by agent type.
-
-        Args:
-            agent_type: One of 'design', 'research', 'review', 'code', 'all'
-
-        Returns:
-            List of StructuredTool instances for that agent.
-        """
-        await self.initialize_servers()
-
-        # Return cached tools if available
-        if agent_type in self._tool_cache:
-            return self._tool_cache[agent_type]
-
-        all_tools = await self._load_all_tools()
-
-        if agent_type == "design":
-            filtered = [
-                t for t in all_tools
-                if t.name in RESEARCH_DOC_TOOL_NAMES or t.name in FILESYSTEM_TOOL_NAMES
-            ]
-        elif agent_type == "research":
-            filtered = [
-                t for t in all_tools
-                if t.name.startswith("firecrawl_") or t.name in RESEARCH_DOC_TOOL_NAMES
-            ]
-        elif agent_type == "review":
-            filtered = [t for t in all_tools if t.name.startswith(BROWSER_TOOL_PREFIX)]
-        elif agent_type == "code":
-            filtered = [
-                t for t in all_tools
-                if t.name in RESEARCH_DOC_TOOL_NAMES or t.name in FILESYSTEM_TOOL_NAMES
-            ]
-        else:
-            filtered = all_tools
-
-        self._tool_cache[agent_type] = filtered
-        logger.info(f"Returning {len(filtered)} tools for agent type '{agent_type}'")
-        return filtered
-
-    async def _load_all_tools(self) -> List[StructuredTool]:
-        if self._all_tools is not None:
-            return self._all_tools
-
-        all_tools: List[StructuredTool] = []
-        had_failures = False
-        for server_name, server in self.servers.items():
-            try:
-                tools = await server.get_tools()
-                all_tools.extend(tools)
-                logger.info(f"Loaded {len(tools)} tools from {server_name}")
-            except Exception as exc:
-                had_failures = True
-                logger.error(f"Failed to load tools from {server_name}: {exc}")
-
-        if not had_failures:
-            self._all_tools = all_tools
-        return all_tools
-
-    async def test_connectivity(self) -> Dict[str, bool]:
-        """Test connectivity to all MCP servers."""
-        results = {}
-        await self.initialize_servers()
-
-        for name, server in self.servers.items():
-            try:
-                tools = await server.get_tools()
-                results[name] = len(tools) > 0
-                logger.info(f"✓ {name}: {len(tools)} tools available")
-            except Exception as exc:
-                results[name] = False
-                logger.error(f"✗ {name}: connection failed - {exc}")
-
-        return results
+    return value
 
 
-# Global singleton
-_manager: Optional[MCPManager] = None
+def load_mcp_server_config() -> dict[str, Any]:
+    config_path = os.getenv("MCP_CONFIG_PATH", DEFAULT_SERVERS_PATH)
+    with open(config_path, "r", encoding="utf-8") as config_file:
+        config = json.load(config_file)
+
+    if not isinstance(config, dict) or not isinstance(config.get("mcpServers"), dict):
+        raise ValueError(f"MCP config must contain an mcpServers object: {config_path}")
+
+    return _expand_config_value(config)
 
 
-async def get_mcp_manager() -> MCPManager:
-    """Get or create the global MCPManager instance."""
-    global _manager
-    if _manager is None:
-        _manager = MCPManager()
-        await _manager.initialize_servers()
-    return _manager
+def create_mcp_client(allowed_servers: list[str]) -> MCPClient:
+    return MCPClient(
+        config=load_mcp_server_config(),
+        allowed_servers=allowed_servers,
+    )
 
 
-async def get_tools_for_agent(agent_type: str) -> List[StructuredTool]:
-    """Convenience function to get tools for an agent type."""
-    manager = await get_mcp_manager()
-    return await manager.get_tools_for_agent(agent_type)
+async def run_mcp_agent(
+    prompt: str,
+    *,
+    allowed_servers: list[str],
+    system_prompt: str,
+    disallowed_tools: list[str] | None = None,
+    model_name: str = CODE_MODEL,
+    temperature: float = 0.2,
+    max_steps: int = 12,
+) -> str:
+    client = create_mcp_client(allowed_servers=allowed_servers)
+    llm = qwen_llm() if "qwen" in model_name.lower() else deepseek_llm()
+    agent = MCPAgent(
+        llm=llm,
+        client=client,
+        system_prompt=system_prompt,
+        disallowed_tools=disallowed_tools,
+        max_steps=max_steps,
+    )
+    result = await agent.run(prompt)
+    return str(result).strip()
 
 
-async def test_all_connections() -> Dict[str, bool]:
-    """Test all MCP server connections."""
-    manager = await get_mcp_manager()
-    return await manager.test_connectivity()
+async def test_all_connections() -> dict[str, bool]:
+    config = load_mcp_server_config()
+    results: dict[str, bool] = {}
+
+    for server_name in config.get("mcpServers", {}):
+        client = MCPClient(config=config, allowed_servers=[server_name])
+        try:
+            sessions = await client.create_all_sessions()
+            results[server_name] = bool(sessions)
+            await client.close_all_sessions()
+        except Exception as exc:
+            logger.error("MCP server connection failed for %s: %s", server_name, exc)
+            results[server_name] = False
+
+    return results
+
+
+
+
