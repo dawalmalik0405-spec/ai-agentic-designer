@@ -11,6 +11,7 @@ The live backend graph is:
 ```text
 Prompt
   -> Planner Agent
+  -> Research Agent
   -> Code Agent
   -> Packaged React project
 ```
@@ -22,7 +23,8 @@ The frontend sends prompts to the backend, receives generated files, and renders
 The live graph currently uses:
 
 1. `planner`
-2. `code`
+2. `research`
+3. `code`
 
 The planner produces validated structured output for:
 
@@ -31,9 +33,9 @@ The planner produces validated structured output for:
 - `pages`
 - `ui`
 
-The code agent consumes that state and returns a packaged Vite-style React project.
+The research agent gathers MCP-backed inspiration context. The code agent consumes the planned state and research context, then returns a packaged Vite-style React project.
 
-Review, repair, and research agents have been removed from the active code path during the restart. They can be reintroduced later if they are rebuilt around a smaller, tested workflow.
+Review and repair agents have been removed from the active code path during the restart. They can be reintroduced later if they are rebuilt around a smaller, tested workflow.
 
 ## MCP Status
 
@@ -45,6 +47,12 @@ Current MCP entrypoint:
 mcp_tools/initialize_mcps.py
 ```
 
+Current MCP config:
+
+```text
+mcp_tools/servers.json
+```
+
 Configured MCP servers:
 
 - Firecrawl
@@ -54,10 +62,13 @@ Configured MCP servers:
 
 Current state:
 
-- MCP manager code is present.
-- `langchain-mcp-adapters` remains in `requirements.txt`.
-- `agents/designing_agent.py` still uses `get_tools_for_agent`.
-- MCP is not currently wired into the live LangGraph path.
+- MCP usage is built around `mcp_use.MCPClient` and `mcp_use.MCPAgent`.
+- `mcp_tools/servers.json` stores shared MCP server configuration using the `mcpServers` format.
+- Agents pass `allowed_servers` to keep each MCP client scoped to the tools it needs.
+- `agents/research_agent.py` runs a Firecrawl MCPAgent for inspiration search.
+- `agents/designing_agent.py` runs Context7 and filesystem MCPAgents for design context and persistence.
+- `agents/code_agent.py` runs page generation through a Context7 MCPAgent.
+- `MCP_CONFIG_PATH` can override the default server config path.
 
 Recommended next MCP step:
 
@@ -65,7 +76,7 @@ Recommended next MCP step:
 Planner -> Design Context MCP Node -> Code
 ```
 
-That keeps the system focused while allowing Context7 or filesystem-backed design context to improve generation quality.
+That keeps the system focused while allowing Context7 or filesystem-backed design context to improve generation quality before code generation.
 
 ## Current Packaged Output
 
@@ -106,6 +117,7 @@ ai_agentic_designer
 |  |- graphs.py
 |  |- llm.py
 |  |- planner_agent.py
+|  |- research_agent.py
 |  |- state.py
 |  `- __init__.py
 |- frontend
@@ -119,6 +131,7 @@ ai_agentic_designer
 |  |- package.json
 |  `- vite.config.ts
 |- mcp_tools
+|  |- servers.json
 |  `- initialize_mcps.py
 |- node
 |  |- nodes.py
@@ -132,7 +145,6 @@ ai_agentic_designer
 
 These files are no longer part of the current workspace:
 
-- `agents/research_agent.py`
 - `agents/review_agent.py`
 - `agents/repair_agent.py`
 - old generated `design_tokens/*.json`
@@ -221,11 +233,10 @@ Implemented:
 - frontend prompt UI
 - iframe-based preview
 - code tab file viewer
-- MCP manager retained for future wiring
+- MCPAgent pipeline wired through JSON-backed MCP client configuration
 
 Not currently active:
 
-- Research Agent
 - Review Agent
 - Repair Agent
 - automatic browser review
