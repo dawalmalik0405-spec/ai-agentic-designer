@@ -8,7 +8,7 @@ from agents.state import AgentState
 logger = logging.getLogger(__name__)
 
 
-def planner_node(state: AgentState):
+async def planner_node(state: AgentState):
     try:
         selected_style = str(state.get("selected_style", "")).strip()
         if not selected_style:
@@ -31,7 +31,7 @@ def planner_node(state: AgentState):
         raise RuntimeError(f"Planner node failed: {exc}") from exc
 
 
-def code_node(state: AgentState):
+async def code_node(state: AgentState):
     try:
         page_count = len(state.get("pages", {}).get("pages", []))
         print(f"[agent] code: started ({page_count} pages)", flush=True)
