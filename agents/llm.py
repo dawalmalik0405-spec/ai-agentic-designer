@@ -3,6 +3,7 @@ import os
 
 from dotenv import load_dotenv
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_groq import ChatGroq
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -16,6 +17,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 PLANNING_MODEL = os.getenv("PLANNING_MODEL", "meta/llama-3.3-70b-instruct")
+
+RESEARCH_MODEL = os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile")
 CODE_MODEL = os.getenv("CODE_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
 
 
@@ -43,3 +46,13 @@ def deepseek_llm():
 
 def qwen_llm():
     return _build_nvidia_llm(CODE_MODEL, temperature=0.7)
+
+
+def research_llm():
+    llm = ChatGroq(
+        api_key=os.getenv("GROQ_API_KEY"),
+        model=os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile"),
+        temperature=0
+    )
+    
+    return llm
