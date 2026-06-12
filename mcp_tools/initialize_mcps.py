@@ -108,7 +108,7 @@ async def run_mcp_agent(
     max_steps: int = 12,
 ) -> str:
     client = create_mcp_client(allowed_servers=allowed_servers)
-    llm = qwen_llm() if "qwen" in model_name.lower() else deepseek_llm()
+    llm = model_name
     agent = MCPAgent(
         llm=llm,
         client=client,
