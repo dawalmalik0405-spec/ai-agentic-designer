@@ -2,52 +2,55 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from schema.architect import ArchitectOutput
 
-from llm import deepseek_llm
+from agents.llm import deepseek_llm
+import asyncio
 
 
 SYSTEM_PROMPT = """
 You are an elite Website Architect.
 
-You are simultaneously:
-
-- Product Strategist
-- UX Architect
-- Conversion Strategist
-- Design Strategist
-- Motion Designer
-- Interaction Designer
-
-Your responsibility is to transform a user request into a complete
+Your responsibility is to create a high-level
 website architecture.
 
-Infer missing requirements automatically.
+Your job is NOT to design the website.
 
-Always determine:
+Do NOT generate:
 
-- business goals
+- exact layouts
+- exact animations
+- exact interactions
+- exact component behavior
+- exact content
+- exact copywriting
+- exact visual effects
+- exact implementation details
+
+Your job is ONLY to determine:
+
+- project summary
 - target audience
-- conversion goals
-- user journeys
-- information architecture
-- page blueprints
+- business goals
 - design direction
 - motion direction
-- premium features
-- interaction requirements
+- required pages
+- required sections
 - research requirements
+- missing requirements
 
-Plan a premium production-grade website.
+The architecture must help downstream agents:
 
-The output must be detailed enough that:
+1. Research Agent
+2. Visual Asset Agent
+3. Design System Agent
+4. Page Design Agent
+5. Code Agent
 
-1. A Research Agent can perform competitor research.
-2. A Design Agent can create a design system.
-3. A Page Design Agent can design every page.
-4. A Code Agent can implement the website.
+Think strategically.
 
-Return only structured output.
+Stay at the architecture level.
+
+Return only valid structured output.
 """
-
 
 
 
@@ -81,6 +84,8 @@ class ArchitectAgent:
 
     def __init__(self):
 
+        print("Initializing model...")
+
         self.model = (
             deepseek_llm()
             .with_structured_output(
@@ -88,18 +93,23 @@ class ArchitectAgent:
             )
         )
 
+        print("Model initialized.")
+
     
 
 
-    def build_architecture(
+    async def build_architecture(
         self,
         prompt: str,
         selected_style: str,
     ) -> ArchitectOutput:
         
+
+        print("Building prompt...")
+        
         style_guidance = STYLE_GUIDANCE.get(
             selected_style.lower(),
-            selected_style
+            "premium modern web design"
         )
 
         messages = [
@@ -107,7 +117,7 @@ class ArchitectAgent:
 
             HumanMessage(
                 content=f"""
-User Request:
+User Request:   
 
 {prompt}
 
@@ -120,16 +130,35 @@ Style Guidance:
 {style_guidance}
 
 
+Target Technical Stack:
 
+Frontend:
 - React
 - TailwindCSS
-- Framer Motion
 
-Plan animations and interactions that can
-realistically be implemented using this stack.
+Animation:
+- Framer Motion
+- GSAP
+
+
 
 
 Create a complete website architecture.
+
+Stay at a strategic level.
+
+Do not provide implementation details.
+
+Do not describe exact animations.
+
+Do not describe exact interactions.
+
+Do not describe exact component behavior.
+
+Do not describe exact content.
+
+Only define goals, structure, priorities,
+and research direction.
 
 Infer all missing requirements.
 
@@ -138,8 +167,74 @@ Return a detailed ArchitectOutput.
             )
         ]
 
-        result = self.model.invoke(messages)
+
+        print("Calling LLM...")
+
+        result = await self.model.ainvoke(messages)
+
+        print("LLM returned result.")
+
+        if not result.page_blueprints:
+            raise ValueError(
+                "Architect produced no pages."
+            )
+
+        if not result.research_requirements.search_queries:
+            raise ValueError(
+                "Architect produced no search queries."
+            )
+
+        if not result.missing_requirements:
+            raise ValueError(
+                "Architect failed to infer missing requirements."
+            )
 
         return result
-    
 
+
+
+
+
+if __name__ == "__main__":
+
+    import time
+
+    print("Creating Architect Agent...")
+
+    agent = ArchitectAgent()
+
+    print("Running Architecture Generation...")
+
+    start = time.time()
+
+    result = asyncio.run(
+        agent.build_architecture(
+            prompt="""
+            Build a premium AI startup website
+            for autonomous AI agents.
+            """,
+            selected_style="glassmorphism"
+        )
+    )
+
+    print(
+        f"Architect time: "
+        f"{time.time() - start:.2f}s"
+    )
+
+    print(
+        result.model_dump_json(
+            indent=2
+        )
+    )
+
+    with open(
+        "architect_output.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(
+            result.model_dump_json(
+                indent=2
+            )
+        )
