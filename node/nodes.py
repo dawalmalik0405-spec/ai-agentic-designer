@@ -1,7 +1,7 @@
 import logging
 
 from agents.code_agent import generate_code
-from agents.planner_agent import planner
+from agents.architect_agent import planner
 from agents.research_agent import ResearchAgent
 from agents.state import AgentState
 
