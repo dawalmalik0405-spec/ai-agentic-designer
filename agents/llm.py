@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 PLANNING_MODEL = os.getenv("PLANNING_MODEL", "meta/llama-3.3-70b-instruct")
 
+REASONING_MODEL = os.getenv("REASON_MODEL", "openai/gpt-oss-120b")
+
 RESEARCH_MODEL = os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile")
 CODE_MODEL = os.getenv("CODE_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
 
@@ -56,3 +58,8 @@ def research_llm():
     )
     
     return llm
+
+
+
+def reason_llm():
+    return _build_nvidia_llm(REASONING_MODEL, temperature=1.5)
