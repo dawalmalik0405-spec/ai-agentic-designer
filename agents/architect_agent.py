@@ -160,6 +160,41 @@ Do not describe exact content.
 Only define goals, structure, priorities,
 and research direction.
 
+
+Research Sources To Consider:
+
+- Apple
+- Stripe
+- Linear
+- Vercel
+- OpenAI
+- Anthropic
+- Airbnb
+- Framer
+- Magic UI
+- Uiverse
+- Mobbin
+- Dribbble
+- Awwwards
+- Landbook
+- One Page Love
+- SaaSFrame
+- v0 by Vercel
+
+When creating research requirements,
+generate search queries that help discover:
+
+- modern AI startup websites
+- premium SaaS websites
+- hero section inspiration
+- typography inspiration
+- motion design inspiration
+- interaction patterns
+- component libraries
+- premium landing pages
+- glassmorphism examples
+- AI product websites
+
 Infer all missing requirements.
 
 Return a detailed ArchitectOutput.
