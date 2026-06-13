@@ -1,9 +1,8 @@
 from mcp_tools.firecrawl.reasearch_tool import (
     scrap_design,
-    search_design,
-    crawl_web
+    search_design
 )
-from agents.llm import research_llm
+from agents.llm import deepseek_llm
 from schema.architect import ArchitectOutput
 from schema.research import ResearchOutput
 
@@ -16,62 +15,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
-SYSTEM_PROMPT = """
-You are an elite Website Research Agent.
-
-You are researching websites for a premium
-AI-powered website generation platform.
-
-Your goal is not content research.
-
-Your goal is design intelligence.
-
-Research:
-
-- layouts
-- visual hierarchy
-- hero sections
-- section ordering
-- CTA placement
-- typography systems
-- color systems
-- motion systems
-- interactions
-- premium visual details
-
-Prefer:
-
-- Apple
-- Stripe
-- Linear
-- Vercel
-- OpenAI
-- Anthropic
-- Airbnb
-- Framer
-
-Search multiple times.
-
-use provided tools.
-
-Scrape websites when necessary.
-
-Gather enough information that a
-Design System Agent can build a
-world-class design system.
-"""
-
 class ResearchAgent:
 
     def __init__(self):
 
-        self.model = research_llm()
+        self.model = deepseek_llm()
 
-        self.parser_model = research_llm()
+        self.parser_model = (
+            deepseek_llm()
+            .with_structured_output(
+                ResearchOutput
+            )
+        )
 
         self.url_selector = (
-            research_llm()
+            deepseek_llm()
             .with_structured_output(
                 WebsiteSelection
             )
@@ -90,6 +48,66 @@ class ResearchAgent:
         #     system_prompt=SYSTEM_PROMPT
         # )
 
+
+    def generate_queries(
+        self,
+        architect_output: ArchitectOutput
+    ) -> list[str]:
+
+        project_type = (
+            architect_output
+            .project_summary
+            .project_type
+        )
+
+        style = (
+            architect_output
+            .design_direction
+            .style
+        )
+
+        inspiration = (
+            architect_output
+            .design_direction
+            .inspiration_keywords
+        )
+
+        queries = [
+
+            f"{project_type} website inspiration",
+
+            f"{project_type} landing page design",
+
+            f"{project_type} hero section",
+
+            f"{style} website examples",
+
+            "Linear website design",
+
+            "Stripe website design",
+
+            "Vercel website inspiration",
+
+            "OpenAI website design",
+
+            "Anthropic website design",
+
+            "Framer website inspiration",
+        ]
+
+        queries.extend(inspiration)
+        queries.extend([
+            "Magic UI components",
+            "Uiverse UI components",
+            "Mobbin SaaS landing page",
+            "Awwwards AI website",
+            "Landbook SaaS website",
+            "One Page Love startup website",
+            "v0 landing page inspiration"
+        ])
+
+        return queries
+
     async def research(
         self,
         architect_output: ArchitectOutput
@@ -107,8 +125,24 @@ class ResearchAgent:
             architect_output.research_requirements
         )
 
-        queries  = (
+        queries = []
+
+        queries.extend(
             research_requirements.search_queries
+        )
+
+        queries.extend(
+            research_requirements.inspiration_sources
+        )
+
+        queries.extend(
+            self.generate_queries(
+                architect_output
+            )
+        )
+
+        queries = list(
+            dict.fromkeys(queries)
         )
 
         all_search = []
@@ -126,7 +160,7 @@ class ResearchAgent:
             all_search.append(
                 {
                     "query": query,
-                    "results": str(search_result)[:4000]
+                    "results": str(search_result)[:300]
                 }
             )
 
@@ -140,24 +174,38 @@ class ResearchAgent:
 
 
         analysis_prompt = f"""
-            You are a senior UX researcher.
+            You are selecting websites
+            for design intelligence research.
 
             Search Results:
 
             {all_search}
 
-            Select:
+            Rules:
 
-            - best competitor websites
-            - best inspiration websites
-            - best motion references
-            - best typography references
+            - Select at most 5 websites.
+            - Prefer product websites.
+            - Prefer premium SaaS websites.
+            - Prefer AI product websites.
+            - Prefer:
+                - Stripe
+                - Linear
+                - Vercel
+                - OpenAI
+                - Anthropic
+                - Framer
+                - Apple
+                - Uiverse
 
-            Return:
 
-            - website name
-            - url
-            - reason
+            Do not select:
+
+            - blogs
+            - accessibility articles
+            - research papers
+            - forums
+
+            Return only the best websites.
             """
 
 
@@ -165,23 +213,39 @@ class ResearchAgent:
             analysis_prompt
         )
 
+        selection.websites = (
+            selection.websites[:5]
+        )
+
+        print("\nSelected Websites:\n")
+
+        for website in selection.websites:
+            print(
+                website.name,
+                website.url
+            )
+
+        if not selection.websites:
+            raise ValueError(
+                "No websites selected."
+            )
+
         urls = [
             website.url
-            for website in selection.websites
+            for website in selection.websites[:5]
         ]
 
 
-        scraped_data = []
-
-        urls = extract_urls(
-            url_selection.content
+        logger.info(
+            "Selected %s websites",
+            len(selection.websites)
         )
 
-
+        scraped_data = []
 
         for url in urls:
 
-            try:   
+            try:
 
                 data = await scrap_design.ainvoke(
                     {
@@ -189,7 +253,19 @@ class ResearchAgent:
                     }
                 )
 
-                scraped_data.append(data)
+                scraped_data.append(
+                    {
+                        "url": url,
+                        "content": str(data)[:1500]
+                    }
+                )
+
+                print("\nScraped Sites:")
+
+                for site in scraped_data:
+                    print(site["url"])
+
+        
 
             except Exception as exc:
 
@@ -199,110 +275,94 @@ class ResearchAgent:
                     exc
                 )
 
+        logger.info(
+            "Scraped %s websites",
+            len(scraped_data)
+        )
 
 
 
+        research_prompt = f"""
+            Project Summary:
 
+            {project_summary.model_dump_json(indent=2)}
 
+            Design Direction:
 
+            {design_direction.model_dump_json(indent=2)}
 
+            Research Goals:
 
+            {research_requirements.research_goals}
 
+            Search Results:
 
-        prompt = f"""
-        Project Type:
-        {project_summary.project_type}
+            {all_search}
 
-        Business Goal:
-        {project_summary.business_goal}
+            Scraped Websites:
 
-        Target Audience:
-        {project_summary.target_audience}
+            {scraped_data}
 
-        Design Style:
-        {design_direction.style}
+            You are an elite website design researcher.
 
-        Mood:
-        {design_direction.mood}
+            Analyze all collected websites.
 
-        Research Queries:
-        {research_requirements.search_queries}
+            Extract:
 
-        Research Goals:
-        {research_requirements.research_goals}
+            - hero section patterns
+            - page structure patterns
+            - navigation patterns
+            - typography systems
+            - color systems
+            - animation systems
+            - interaction systems
+            - premium UI patterns
+            - premium UX patterns
+            - modern AI startup design trends
 
-        Use tools aggressively.
+            Focus only on reusable design intelligence.
+            Do not summarize website content.
 
-        Search multiple times if necessary.
+            Return detailed design intelligence.
+            """
+        
+        print("\nScraped Count:")
+        print(len(scraped_data))
 
-        Scrape websites when necessary.
+        research_response = await self.model.ainvoke(
+            research_prompt
+        )
 
-        Focus on gathering information useful for:
-
-        - Design System Agent
-        - Visual Asset Agent
-        - Page Design Agent
-
-        Return detailed findings.
-        """
-
-        for attempt in range(3):
-
-            try:
-                result = await self.agent.ainvoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": prompt
-                            }
-                        ]
-                    }
-                )
-
-                break
-
-            except Exception as exc:
-
-                logger.warning(
-                    "Research attempt %s failed: %s",
-                    attempt + 1,
-                    exc
-                )
-
-                if attempt == 2:
-                    raise
-
-
-        messages = result.get("messages", [])
-
-        if not messages:
-            raise ValueError(
-                "Research agent returned no messages."
-            )
-
-        research_text = messages[-1].content
+        research_text = research_response.content
 
 
         structured_prompt = f"""
             Convert the following website research
             into a valid ResearchOutput.
 
-            Requirements:
+            IMPORTANT:
 
-            - include all discovered references
-            - include hero patterns
-            - include layout patterns
-            - include typography patterns
-            - include color patterns
-            - include animation patterns
-            - include interaction patterns
-            - include premium features
+            Only include references that exist in:
+
+            {urls}
+
+            Do not invent websites.
+            Do not add references that were not scraped.
 
             Research Findings:
 
             {research_text}
             """
+        
+        print("\nResearch Text Length:")
+        print(len(research_text))
+
+        with open(
+            "raw_research.txt",
+            "w",
+            encoding="utf-8"
+        ) as f:
+            f.write(research_text)
         
         research_output = await self.parser_model.ainvoke(
             structured_prompt
