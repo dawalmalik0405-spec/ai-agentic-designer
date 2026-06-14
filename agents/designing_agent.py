@@ -159,76 +159,76 @@ class DesigningAgent:
 
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
 
 
-    import asyncio
+#     import asyncio
 
 
 
-    async def main():
+#     async def main():
      
-        print("Loading Architect Output...")
+#         print("Loading Architect Output...")
 
-        with open(
-            "architect_output.json",
-            "r",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             "architect_output.json",
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
 
-            architecture = (
-                ArchitectOutput
-                .model_validate_json(
-                    f.read()
-                )
-            )
+#             architecture = (
+#                 ArchitectOutput
+#                 .model_validate_json(
+#                     f.read()
+#                 )
+#             )
 
-        print("Architect Output Loaded")
-
-
-        print("Loading Reasearch Output...")
-
-        with open(
-            "research_output.json",
-            "r",
-            encoding="utf-8"
-        ) as i:
-
-            reasearh = (
-                ResearchOutput
-                .model_validate_json(
-                    i.read()
-                )
-            )
-
-        print("rsearch Output Loaded")
+#         print("Architect Output Loaded")
 
 
-        agent  = DesigningAgent()
+#         print("Loading Reasearch Output...")
 
-        design = await agent.design_system(
-            architecture,
-            reasearh
-        )
+#         with open(
+#             "research_output.json",
+#             "r",
+#             encoding="utf-8"
+#         ) as i:
 
-        print(
-            design.model_dump_json(indent=2)
-        )
+#             reasearh = (
+#                 ResearchOutput
+#                 .model_validate_json(
+#                     i.read()
+#                 )
+#             )
 
-        with open(
-            "design_output.json",
-            "w",
-            encoding="utf-8"
-        ) as f:
+#         print("rsearch Output Loaded")
 
-            f.write(
-                design.model_dump_json(
-                    indent=2
-                )
-            )
 
-    asyncio.run(main())
+#         agent  = DesigningAgent()
+
+#         design = await agent.design_system(
+#             architecture,
+#             reasearh
+#         )
+
+#         print(
+#             design.model_dump_json(indent=2)
+#         )
+
+#         with open(
+#             "design_output.json",
+#             "w",
+#             encoding="utf-8"
+#         ) as f:
+
+#             f.write(
+#                 design.model_dump_json(
+#                     indent=2
+#                 )
+#             )
+
+#     asyncio.run(main())
 
 
 

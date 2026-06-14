@@ -230,46 +230,46 @@ Return a detailed ArchitectOutput.
 
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    import time
+#     import time
 
-    print("Creating Architect Agent...")
+#     print("Creating Architect Agent...")
 
-    agent = ArchitectAgent()
+#     agent = ArchitectAgent()
 
-    print("Running Architecture Generation...")
+#     print("Running Architecture Generation...")
 
-    start = time.time()
+#     start = time.time()
 
-    result = asyncio.run(
-        agent.build_architecture(
-            prompt="""
-            Build a premium AI startup website
-            for autonomous AI agents.
-            """,
-            selected_style="glassmorphism"
-        )
-    )
+#     result = asyncio.run(
+#         agent.build_architecture(
+#             prompt="""
+#             Build a premium AI startup website
+#             for autonomous AI agents.
+#             """,
+#             selected_style="glassmorphism"
+#         )
+#     )
 
-    print(
-        f"Architect time: "
-        f"{time.time() - start:.2f}s"
-    )
+#     print(
+#         f"Architect time: "
+#         f"{time.time() - start:.2f}s"
+#     )
 
-    print(
-        result.model_dump_json(
-            indent=2
-        )
-    )
+#     print(
+#         result.model_dump_json(
+#             indent=2
+#         )
+#     )
 
-    with open(
-        "architect_output.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-        f.write(
-            result.model_dump_json(
-                indent=2
-            )
-        )
+#     with open(
+#         "architect_output.json",
+#         "w",
+#         encoding="utf-8"
+#     ) as f:
+#         f.write(
+#             result.model_dump_json(
+#                 indent=2
+#             )
+#         )
