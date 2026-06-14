@@ -185,52 +185,52 @@ class PageAgent:
 
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
    
 
-  import asyncio
-  import json
+#   import asyncio
+#   import json
 
-  async def main():
+#   async def main():
 
-      print("loading arch")
-      with open(
-          "architect_output.json",
-          "r",
-          encoding="utf-8"
-      ) as f:
-          architect = (
-              ArchitectOutput
-              .model_validate_json(
-                  f.read()
-              )
-          )
+#       print("loading arch")
+#       with open(
+#           "architect_output.json",
+#           "r",
+#           encoding="utf-8"
+#       ) as f:
+#           architect = (
+#               ArchitectOutput
+#               .model_validate_json(
+#                   f.read()
+#               )
+#           )
 
 
-      print("loading design")
-      with open(
-          "design_output.json",
-          "r",
-          encoding="utf-8"
-      ) as f:
-          design = (
-              DesignSystemOutput
-              .model_validate_json(
-                  f.read()
-              )
-          )
+#       print("loading design")
+#       with open(
+#           "design_output.json",
+#           "r",
+#           encoding="utf-8"
+#       ) as f:
+#           design = (
+#               DesignSystemOutput
+#               .model_validate_json(
+#                   f.read()
+#               )
+#           )
 
-      agent = PageAgent()
+#       agent = PageAgent()
 
-      result = await agent.design_pages(
-          architect,
-          design
-      )
+#       result = await agent.design_pages(
+#           architect,
+#           design
+#       )
 
-      print(
-          result.model_dump_json(
-              indent=2
-          )
-      )
+#       print(
+#           result.model_dump_json(
+#               indent=2
+#           )
+#       )
 
-  asyncio.run(main())
+#   asyncio.run(main())

@@ -400,62 +400,62 @@ class ResearchAgent:
         return research_output
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    import asyncio
-    import json
+#     import asyncio
+#     import json
 
-    from schema.architect import ArchitectOutput
+#     from schema.architect import ArchitectOutput
 
-    async def main():
+#     async def main():
 
-        print("Loading Architect Output...")
+#         print("Loading Architect Output...")
 
-        with open(
-            "architect_output.json",
-            "r",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             "architect_output.json",
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
 
-            architecture = (
-                ArchitectOutput
-                .model_validate_json(
-                    f.read()
-                )
-            )
+#             architecture = (
+#                 ArchitectOutput
+#                 .model_validate_json(
+#                     f.read()
+#                 )
+#             )
 
-        print("Architect Output Loaded")
+#         print("Architect Output Loaded")
 
-        researcher = ResearchAgent()
+#         researcher = ResearchAgent()
 
-        print("Starting Research...")
+#         print("Starting Research...")
 
-        research = await researcher.research(
-            architecture
-        )
+#         research = await researcher.research(
+#             architecture
+#         )
 
-        print("Research Completed")
+#         print("Research Completed")
 
-        print(
-            research.model_dump_json(
-                indent=2
-            )
-        )
+#         print(
+#             research.model_dump_json(
+#                 indent=2
+#             )
+#         )
 
-        with open(
-            "research_output.json",
-            "w",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             "research_output.json",
+#             "w",
+#             encoding="utf-8"
+#         ) as f:
 
-            f.write(
-                research.model_dump_json(
-                    indent=2
-                )
-            )
+#             f.write(
+#                 research.model_dump_json(
+#                     indent=2
+#                 )
+#             )
 
-        print(
-            "Research saved to research_output.json"
-        )
+#         print(
+#             "Research saved to research_output.json"
+#         )
 
-    asyncio.run(main())
+#     asyncio.run(main())

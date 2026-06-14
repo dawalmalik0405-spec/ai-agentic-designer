@@ -23,6 +23,14 @@ You do NOT create files.
 
 You only create an asset plan.
 
+
+
+- generate
+- internet
+- icon_library
+- logo_library
+- client_provided
+
 Determine:
 
 - images
@@ -48,6 +56,33 @@ For every asset define:
 - format
 
 Use the Page Design output.
+
+
+
+For generated assets create production-ready prompts.
+
+Prompts must include:
+
+- subject
+- composition
+- camera angle
+- lighting
+- atmosphere
+- color palette
+- visual style
+- quality level
+- rendering style
+
+Prompts should be directly usable by:
+
+- Flux
+- Pollinations
+- SDXL
+- Grok Image
+
+Avoid vague prompts.
+
+Every generated asset must have a highly detailed prompt.
 
 Return only valid AssetOutput.
 """
@@ -87,6 +122,15 @@ class AssetAgent:
               {page_output.model_dump_json(indent=2)}
 
               Determine every asset required.
+              Avoid duplicate assets.
+
+              Reuse assets whenever possible.
+
+              Only create assets that are actually
+              required by the page design.
+
+              Do not generate decorative assets
+              without purpose.
 
               For each asset decide:
 
@@ -122,23 +166,68 @@ class AssetAgent:
                   f"{asset.asset_id} missing type."
               )
 
-          if not asset.prompt:
+          if (
+              asset.generation_required
+              and not asset.prompt
+          ):
               raise ValueError(
                   f"{asset.asset_id} missing prompt."
               )
           
-
-          with open(
-              "asset_output.json",
-              "w",
-              encoding="utf-8"
-          ) as f:
-
-              f.write(
-                  result.model_dump_json(
-                      indent=2
-                  )
+          if not asset.source_strategy:
+              raise ValueError(
+                  f"{asset.asset_id} missing source strategy."
               )
+          
+
+      with open(
+          "asset_output.json",
+          "w",
+          encoding="utf-8"
+      ) as f:
+
+          f.write(
+              result.model_dump_json(
+                  indent=2
+              )
+          )
 
       return result
 
+
+
+
+# if __name__ == "__main__":
+    
+#     import asyncio
+#     import json
+
+#     async def main():
+
+#         print("loading arch")
+#         with open(
+#             "page_design_output.json",
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
+#             page = (
+#                 PageDesignOutput
+#                 .model_validate_json(
+#                     f.read()
+#                 )
+#             )
+
+
+#         agent = AssetAgent()
+
+#         result = await agent.plan_assets(
+#             page,
+#         )
+
+#         print(
+#             result.model_dump_json(
+#                 indent=2
+#             )
+#         )
+
+#     asyncio.run(main())
