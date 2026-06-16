@@ -114,3 +114,14 @@ class AssetStorage:
             )
 
         return path
+    
+
+    def save_generated_assets_output(
+        self,
+        output
+    ) -> str:
+
+        return self.save_metadata(
+            output.model_dump(),
+            "generated_assets.json"
+        )
