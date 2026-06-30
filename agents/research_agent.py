@@ -208,10 +208,16 @@ class ResearchAgent:
             Return only the best websites.
             """
 
-
+        print("\nFIRST SEARCH RESULT:")
+        print(all_search[0])
+        
         selection = await self.url_selector.ainvoke(
             analysis_prompt
         )
+
+        print("\nSelection:")
+        print(selection)
+        print(type(selection))
 
         selection.websites = (
             selection.websites[:5]
