@@ -1,12 +1,12 @@
 from pydantic import BaseModel
 
-from architect import ArchitectOutput
-from research import ResearchOutput
-from desighn import DesignSystemOutput
-from page_d import PageDesignOutput
-from asset import AssetOutput
-from asset_gen import GeneratedAssetOutput
-from frame import FrameExtractionOutput
+from schema.architect import ArchitectOutput
+from schema.research import ResearchOutput
+from schema.desighn import DesignSystemOutput
+from schema.page_d import PageDesignOutput
+from schema.asset import AssetOutput
+from schema.asset_gen import GeneratedAssetOutput
+from schema.frame import FrameExtractionOutput
 
 
 
