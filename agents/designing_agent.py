@@ -15,7 +15,7 @@ from langchain_core.messages import (
 import logging
 
 
-from agents.llm import reason_llm
+from agents.llm import deepseek_llm
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class DesigningAgent:
     def __init__(self):
   
         self.model = (
-                reason_llm()
+                deepseek_llm()
                 .with_structured_output(
                     DesignSystemOutput
                 )
@@ -130,6 +130,8 @@ class DesigningAgent:
 
 
             result = await self.model.ainvoke(messages)
+
+            print(result)
 
             if not result.colors:
                 raise ValueError(

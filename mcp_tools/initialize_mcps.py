@@ -103,21 +103,36 @@ async def run_mcp_agent(
     allowed_servers: list[str],
     system_prompt: str,
     disallowed_tools: list[str] | None = None,
-    model_name: str = CODE_MODEL,
-    temperature: float = 0.2,
+    llm=None,
+    
+    
     max_steps: int = 12,
 ) -> str:
-    client = create_mcp_client(allowed_servers=allowed_servers)
-    llm = model_name
-    agent = MCPAgent(
-        llm=llm,
-        client=client,
-        system_prompt=system_prompt,
-        disallowed_tools=disallowed_tools,
-        max_steps=max_steps,
+    if llm is None:
+        llm = CODE_MODEL
+
+
+    client = create_mcp_client(
+    allowed_servers=allowed_servers
     )
-    result = await agent.run(prompt)
-    return str(result).strip()
+
+    try:
+
+        agent = MCPAgent(
+            llm=llm,
+            client=client,
+            system_prompt=system_prompt,
+            disallowed_tools=disallowed_tools,
+            max_steps=max_steps,
+        )
+
+        result = await agent.run(prompt)
+
+        return result
+
+    finally:
+
+        await client.close_all_sessions()
 
 
 async def test_all_connections() -> dict[str, bool]:

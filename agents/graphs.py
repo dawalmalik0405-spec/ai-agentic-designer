@@ -1,51 +1,136 @@
-from langgraph.graph import StateGraph
+from langgraph.graph import (
+    StateGraph,
+    START,
+    END
+)
 
-from agents.state import AgentState
-from node.nodes import code_node, planner_node, research_node
+from schema.state import WebsiteBuilderState
+
+from node.nodes import (
+    architect_node,
+    research_node,
+    design_node,
+    page_node,
+    asset_node,
+    generation_node,
+    frame_extraction_node,
+    code_node
+)
 
 
-def create_agent_graph():
-    workflow = StateGraph(AgentState)
+builder = StateGraph(
+    WebsiteBuilderState
+)
 
-    workflow.add_node("plan", planner_node)
-    workflow.add_node("research", research_node)
-    workflow.add_node("code", code_node)
+builder.add_node(
+    "architect",
+    architect_node
+)
 
-    workflow.set_entry_point("plan")
-    workflow.add_edge("plan", "research")
-    workflow.add_edge("research", "code")
+builder.add_node(
+    "research",
+    research_node
+)
 
-    return workflow.compile()
+builder.add_node(
+    "design",
+    design_node
+)
+
+builder.add_node(
+    "page",
+    page_node
+)
+
+builder.add_node(
+    "asset",
+    asset_node
+)
+
+builder.add_node(
+    "generation",
+    generation_node
+)
+
+builder.add_node(
+    "frame_extraction",
+    frame_extraction_node
+)
+
+builder.add_node(
+    "code",
+    code_node
+)
 
 
-async def run_graph_async(prompt: str, selected_style: str):
-    graph = create_agent_graph()
-    final_state = await graph.ainvoke(
+
+
+builder.add_edge(
+    START,
+    "architect"
+)
+
+builder.add_edge(
+    "architect",
+    "research"
+)
+
+builder.add_edge(
+    "research",
+    "design"
+)
+
+builder.add_edge(
+    "design",
+    "page"
+)
+
+builder.add_edge(
+    "page",
+    "asset"
+)
+
+builder.add_edge(
+    "asset",
+    "generation"
+)
+
+builder.add_edge(
+    "generation",
+    "frame_extraction"
+)
+
+builder.add_edge(
+    "frame_extraction",
+    "code"
+)
+
+builder.add_edge(
+    "code",
+    END
+)
+
+
+
+graph = builder.compile()
+
+
+
+import asyncio
+
+
+async def main():
+
+    result = await graph.ainvoke(
         {
-            "prompt": prompt,
-            "selected_style": selected_style,
-            "errors": [],
-        },
-        config={"recursion_limit": 80},
+            "user_prompt":
+            "Create a futuristic AI startup website",
+            "selected_style": "modern"
+        }
     )
-    return final_state
 
-
-def run_graph(prompt: str, selected_style: str):
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, run_graph_async(prompt, selected_style))
-                return future.result()
-        else:
-            return asyncio.run(run_graph_async(prompt, selected_style))
-    except RuntimeError:
-        return asyncio.run(run_graph_async(prompt, selected_style))
+    print(result)
 
 
 if __name__ == "__main__":
-    result = run_graph("Create futuristic AI startup website with Glassmorphism style")
-    print(result)
+    asyncio.run(main())
