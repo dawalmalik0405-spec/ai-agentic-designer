@@ -19,13 +19,15 @@ from schema.code import CodeGenerationInput
 async def architect_node(
     state: WebsiteBuilderState
 ):
-
+    print("arch agent started")
     agent = ArchitectAgent()
 
     result = await agent.build_architecture(
         state["user_prompt"],
         selected_style=state["selected_style"]
     )
+
+    print("arch agent finished")
 
     return {
         "architect_output": result
@@ -37,11 +39,14 @@ async def architect_node(
 async def research_node(
         state:WebsiteBuilderState
 ):
+    
+    print("rese agent started")
     agent  =  ResearchAgent()
 
     result = await agent.research(
         state["architect_output"]
     )
+    print("reserr agent finished")
 
     return{
         "research_output":result
@@ -60,6 +65,8 @@ async def design_node(
         research_output=state["research_output"]
     )
 
+    print("dessign agent finished")
+
     return {
         "design_system_output": result
     }
@@ -70,6 +77,7 @@ async def page_node(
     state: WebsiteBuilderState
 ):
 
+    print("page started")
     agent = PageAgent()
 
     result = await agent.design_pages(
@@ -77,6 +85,7 @@ async def page_node(
         design_output=state["design_system_output"]
     )
 
+    print("page finished")
     return {
         "page_design_output": result
     }
@@ -87,11 +96,14 @@ async def asset_node(
     state: WebsiteBuilderState
 ):
 
+    print("asset started ")
     agent = AssetAgent()
 
     result = await agent.generate(
         state["page_design_output"]
     )
+
+    print("asset finished ")
 
     return {
         "asset_output": result

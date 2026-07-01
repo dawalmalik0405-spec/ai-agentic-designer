@@ -89,44 +89,43 @@ class PageAgent:
 
         HumanMessage(
             content=f"""
+        Website Architecture
 
+        Project:
+        {architect_output.project_summary}
 
-    Website Architecture:
+        Pages:
+        {architect_output.page_blueprints}
 
-    {architect_output.model_dump_json(indent=2)}
-    
-    Design System:
+        Motion Direction:
+        {architect_output.motion_direction}
 
-    {design_output.model_dump_json(indent=2)}
+        Design System
 
-    Create complete page blueprints.
+        Colors:
+        {design_output.colors}
 
-    For every page define:
+        Typography:
+        {design_output.typography}
 
-    - page goal
+        Spacing:
+        {design_output.spacing}
 
-    For every section define:
+        Motion:
+        {design_output.motion}
 
-    - section goal
-    - layout
-    - visual style
-    - component placement
-    - animations
-    - interactions
-    - content priority
+        Component Guidelines:
+        {design_output.component_guidelines}
 
-    Generate only pages specified in the
-    Website Architecture.
-
-    Do not invent additional pages.
-
-    Preserve page order and section hierarchy
-    defined by the architect.
-    """
+        Design complete page blueprints.
+        """
         )
     ]
 
 
+    prompt = messages[1].content
+
+    print(f"Prompt size: {len(prompt)} characters")
 
     result = await self.model.ainvoke(
         messages
