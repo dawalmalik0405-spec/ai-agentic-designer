@@ -28,15 +28,13 @@ class ProjectSummary(BaseModel):
 # DESIGN DIRECTION
 # =====================================================
 
+
+
 class DesignDirection(BaseModel):
-
     style: str
-
     mood: str
-
-    visual_hierarchy: str
-
-    inspiration_keywords: List[str]
+    visual_hierarchy: list[str]
+    inspiration_keywords: list[str]
 
 
 # =====================================================
@@ -70,7 +68,7 @@ class SectionBlueprint(BaseModel):
 
     purpose: str
 
-    priority: str
+    priority: int
 
 
 class PageBlueprint(BaseModel):
