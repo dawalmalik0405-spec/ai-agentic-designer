@@ -77,10 +77,10 @@ class FrameStorage:
         return path
     
 
-storage = FrameStorage()
+# storage = FrameStorage()
 
-path = storage.create_video_directory(
-    "castle_intro"
-)
+# path = storage.create_video_directory(
+#     "castle_intro"
+# )
 
-print(path)
+# print(path)
