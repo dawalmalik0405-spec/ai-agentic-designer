@@ -4,6 +4,8 @@ from schema.architect import ArchitectOutput
 
 from agents.llm import deepseek_llm
 import asyncio
+import json
+from pydantic import ValidationError
 
 
 SYSTEM_PROMPT = """
@@ -27,15 +29,62 @@ Do NOT generate:
 
 Your job is ONLY to determine:
 
-- project summary
-- target audience
-- business goals
-- design direction
-- motion direction
-- required pages
-- required sections
-- research requirements
-- missing requirements
+And return ONLY valid JSON.
+
+Do NOT return markdown.
+
+Do NOT explain anything.
+
+Do NOT wrap the JSON inside ```json.
+
+The JSON MUST exactly match this schema.
+
+{
+  "project_summary": {
+    "project_type": "",
+    "business_goal": "",
+    "primary_conversion_goal": "",
+    "target_audience": [],
+    "unique_value_proposition": ""
+  },
+  "design_direction": {
+    "style": "",
+    "mood": "",
+    "visual_hierarchy": "",
+    "inspiration_keywords": []
+  },
+  "motion_direction": {
+    "hero_animation": "",
+    "scroll_animation": "",
+    "page_transition": "",
+    "hover_effects": [],
+    "micro_interactions": [],
+    "storytelling_style": "",
+    "immersive_experience": true
+  },
+  "page_blueprints": [
+    {
+      "name": "",
+      "route": "",
+      "goal": "",
+      "sections": [
+        {
+          "name": "",
+          "purpose": "",
+          "priority": ""
+        }
+      ]
+    }
+  ],
+  "research_requirements": {
+    "industries": [],
+    "competitor_types": [],
+    "research_goals": [],
+    "inspiration_sources": [],
+    "search_queries": []
+  },
+  "missing_requirements": []
+}
 
 The architecture must help downstream agents:
 
@@ -86,16 +135,11 @@ class ArchitectAgent:
 
         print("Initializing model...")
 
-        self.model = (
-            deepseek_llm()
-            .with_structured_output(
-                ArchitectOutput
-            )
-        )
+        self.model = deepseek_llm()
+        
 
         print("Model initialized.")
 
-    
 
 
     async def build_architecture(
@@ -197,6 +241,20 @@ generate search queries that help discover:
 
 Infer all missing requirements.
 
+IMPORTANT
+
+The output MUST exactly match the JSON schema above.
+
+Every field is required.
+
+Do not rename fields.
+
+Do not add extra fields.
+
+Do not omit fields.
+
+Return only JSON.
+
 Return a detailed ArchitectOutput.
 """
             )
@@ -205,24 +263,22 @@ Return a detailed ArchitectOutput.
 
         print("Calling LLM...")
 
-        result = await self.model.ainvoke(messages)
+        response = await self.model.ainvoke(messages)
 
-        print("LLM returned result.")
+        print(response.content)
 
-        if not result.page_blueprints:
-            raise ValueError(
-                "Architect produced no pages."
+        data = json.loads(
+            response.content
+        )
+        try:
+
+            result = ArchitectOutput.model_validate(
+                data
             )
-
-        if not result.research_requirements.search_queries:
-            raise ValueError(
-                "Architect produced no search queries."
-            )
-
-        if not result.missing_requirements:
-            raise ValueError(
-                "Architect failed to infer missing requirements."
-            )
+        
+        except ValidationError as e:
+            print(e)
+            raise 
 
         return result
 
@@ -230,38 +286,39 @@ Return a detailed ArchitectOutput.
 
 
 
-# if __name__ == "__main__":
 
-#     import time
+if __name__ == "__main__":
 
-#     print("Creating Architect Agent...")
+    import time
 
-#     agent = ArchitectAgent()
+    print("Creating Architect Agent...")
 
-#     print("Running Architecture Generation...")
+    agent = ArchitectAgent()
 
-#     start = time.time()
+    print("Running Architecture Generation...")
 
-#     result = asyncio.run(
-#         agent.build_architecture(
-#             prompt="""
-#             Build a premium AI startup website
-#             for autonomous AI agents.
-#             """,
-#             selected_style="glassmorphism"
-#         )
-#     )
+    start = time.time()
 
-#     print(
-#         f"Architect time: "
-#         f"{time.time() - start:.2f}s"
-#     )
+    result = asyncio.run(
+        agent.build_architecture(
+            prompt="""
+            Build a premium AI startup website
+            for autonomous AI agents.
+            """,
+            selected_style="glassmorphism"
+        )
+    )
 
-#     print(
-#         result.model_dump_json(
-#             indent=2
-#         )
-#     )
+    print(
+        f"Architect time: "
+        f"{time.time() - start:.2f}s"
+    )
+
+    print(
+        result.model_dump_json(
+            indent=2
+        )
+    )
 
 #     with open(
 #         "architect_output.json",
