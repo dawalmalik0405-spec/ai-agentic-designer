@@ -43,7 +43,7 @@ def _build_nvidia_llm(model_name: str, temperature: float):
 
 
 def deepseek_llm():
-    return _build_nvidia_llm(PLANNING_MODEL, temperature=1)
+    return _build_nvidia_llm(PLANNING_MODEL, temperature=0.2)
 
 
 def qwen_llm():
