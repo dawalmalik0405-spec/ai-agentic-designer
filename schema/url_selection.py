@@ -10,3 +10,6 @@ class SelectedWebsite(BaseModel):
 
 class WebsiteSelection(BaseModel):
     websites: List[SelectedWebsite]
+
+
+    
