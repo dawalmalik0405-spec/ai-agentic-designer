@@ -28,12 +28,9 @@ class ResearchAgent:
             )
         )
 
-        self.url_selector = (
-            deepseek_llm()
-            .with_structured_output(
-                WebsiteSelection
-            )
-        )
+        self.url_selector = deepseek_llm()
+            
+        
             
 
         # self.tools = [
@@ -174,45 +171,50 @@ class ResearchAgent:
 
 
         analysis_prompt = f"""
-            You are selecting websites
-            for design intelligence research.
+            You are selecting websites for design intelligence research.
 
             Search Results:
 
             {all_search}
 
-            Rules:
+            Select at most 5 websites.
 
-            - Select at most 5 websites.
+            Return ONLY valid JSON.
+            Do not include explanation.
+            Do not include markdown.
+            Do not wrap the JSON in ```json.
+            Do not write any text before or after the JSON.
+
+            The JSON must match this exact schema:
+
+            {{
+            "websites": [
+                {{
+                "name": "Website name",
+                "url": "https://example.com",
+                "reason": "Short reason for selecting this website"
+                }}
+            ]
+            }}
+
+            Rules:
             - Prefer product websites.
             - Prefer premium SaaS websites.
             - Prefer AI product websites.
-            - Prefer:
-                - Stripe
-                - Linear
-                - Vercel
-                - OpenAI
-                - Anthropic
-                - Framer
-                - Apple
-                - Uiverse
-
-
-            Do not select:
-
-            - blogs
-            - accessibility articles
-            - research papers
-            - forums
-
-            Return only the best websites.
+            - Prefer Stripe, Linear, Vercel, OpenAI, Anthropic, Framer, Apple, Uiverse.
+            - Do not select blogs, accessibility articles, research papers, or forums.
             """
 
         print("\nFIRST SEARCH RESULT:")
         print(all_search[0])
-        
-        selection = await self.url_selector.ainvoke(
+
+        selection_response  = await self.model.ainvoke(
             analysis_prompt
+        )
+        print(selection_response.content)
+        
+        selection = WebsiteSelection.model_validate_json(
+            selection_response.content
         )
 
         print("\nSelection:")
@@ -370,8 +372,12 @@ class ResearchAgent:
         ) as f:
             f.write(research_text)
         
-        research_output = await self.parser_model.ainvoke(
+        research_output_response = await self.model.ainvoke(
             structured_prompt
+        )
+
+        research_output = ResearchOutput.model_validate_json(
+            research_output_response.content
         )
 
         if research_output is None:
@@ -409,28 +415,11 @@ class ResearchAgent:
 # if __name__ == "__main__":
 
 #     import asyncio
-#     import json
 
-#     from schema.architect import ArchitectOutput
+#     architecture ="" \
+#     ""
 
 #     async def main():
-
-#         print("Loading Architect Output...")
-
-#         with open(
-#             "architect_output.json",
-#             "r",
-#             encoding="utf-8"
-#         ) as f:
-
-#             architecture = (
-#                 ArchitectOutput
-#                 .model_validate_json(
-#                     f.read()
-#                 )
-#             )
-
-#         print("Architect Output Loaded")
 
 #         researcher = ResearchAgent()
 
