@@ -50,7 +50,7 @@ The JSON MUST exactly match this schema.
   "design_direction": {
     "style": "",
     "mood": "",
-    "visual_hierarchy": "",
+    "visual_hierarchy": [],
     "inspiration_keywords": []
   },
   "motion_direction": {
@@ -86,6 +86,32 @@ The JSON MUST exactly match this schema.
   "missing_requirements": []
 }
 
+priority MUST be an integer.
+
+Allowed values:
+1 = Critical
+2 = High
+3 = Medium
+4 = Low
+
+Do NOT use words like
+critical
+high
+medium
+low
+
+
+visual_hierarchy MUST be a JSON array of strings.
+
+Example:
+
+[
+  "Hero first",
+  "Features second",
+  "Pricing third",
+  "Footer last"
+]
+
 The architecture must help downstream agents:
 
 1. Research Agent
@@ -98,7 +124,6 @@ Think strategically.
 
 Stay at the architecture level.
 
-Return only valid structured output.
 """
 
 
@@ -267,13 +292,9 @@ Return a detailed ArchitectOutput.
 
         print(response.content)
 
-        data = json.loads(
-            response.content
-        )
         try:
-
-            result = ArchitectOutput.model_validate(
-                data
+            result = ArchitectOutput.model_validate_json(
+                response.content
             )
         
         except ValidationError as e:
