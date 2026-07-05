@@ -350,12 +350,62 @@ class ResearchAgent:
 
             IMPORTANT:
 
+            Return ONLY valid JSON.
+            Do not include explanation.
+            Do not include markdown.
+            Do not wrap JSON in code fences.
+
+            Every pattern field must be an array of strings only.
+            Do not return objects inside pattern arrays.
+            Do not use keys like category, examples, details, code, url inside pattern arrays.
+
             Only include references that exist in:
 
             {urls}
 
-            Do not invent websites.
-            Do not add references that were not scraped.
+            The JSON must match this exact shape:
+
+            {{
+            "references": [
+                {{
+                "name": "Linear",
+                "url": "https://linear.app/",
+                "reason": "Short reason"
+                }}
+            ],
+            "hero_patterns": [
+                "Use a clear hero headline with one primary CTA."
+            ],
+            "layout_patterns": [
+                "Use alternating full-width sections for product proof and features."
+            ],
+            "typography_patterns": [
+                "Use high-contrast headings with concise body copy."
+            ],
+            "animation_patterns": [
+                "Use subtle scroll reveals and hover transitions."
+            ],
+            "interaction_patterns": [
+                "Use tabs or segmented controls for feature exploration."
+            ],
+            "color_patterns": [
+                "Use a dark neutral base with one controlled accent color."
+            ],
+            "premium_features": [
+                "Use customer logos and enterprise trust signals near CTAs."
+            ],
+            "research_summary": "Short summary of reusable design intelligence.",
+            "recommended_libraries": [
+                "Framer Motion for animation."
+            ],
+            "raw_research": null,
+            "visual_patterns": [
+                "Use abstract AI visuals and product interface previews."
+            ],
+            "component_patterns": [
+                "Use hero, feature grid, testimonial, pricing, and CTA components."
+            ]
+            }}
 
             Research Findings:
 
