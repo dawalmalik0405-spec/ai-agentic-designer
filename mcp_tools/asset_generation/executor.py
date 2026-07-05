@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from schema.asset import (
     AssetRequirement,
-    AssetType
+    AssetType,
+    SourceStrategy
 )
 
 from schema.asset_gen import (
@@ -39,6 +42,36 @@ class AssetExecutor:
         await self.provider.close()
 
 
+    def _created_at(
+        self
+    ) -> str:
+
+        return datetime.now(
+            timezone.utc
+        ).isoformat()
+
+
+    def skipped_asset(
+        self,
+        asset: AssetRequirement
+    ) -> GeneratedAsset:
+
+        return GeneratedAsset(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            file_path=(
+                f"{asset.source_strategy.value}://"
+                f"{asset.output_filename}"
+            ),
+            provider=asset.source_strategy.value,
+            status=GenerationStatus.SKIPPED,
+            width=asset.width,
+            height=asset.height,
+            created_at=self._created_at(),
+            provider_asset_url=None
+        )
+
+
 
     async def generate_image_asset(
         self,
@@ -67,7 +100,9 @@ class AssetExecutor:
             provider="pollinations",
             status=GenerationStatus.SUCCESS,
             width=asset.width,
-            height=asset.height
+            height=asset.height,
+            created_at=self._created_at(),
+            provider_asset_url=None
         )
     
     async def generate_video_asset(
@@ -120,7 +155,9 @@ class AssetExecutor:
             provider="pollinations",
             status=GenerationStatus.SUCCESS,
             width=asset.width,
-            height=asset.height
+            height=asset.height,
+            created_at=self._created_at(),
+            provider_asset_url=None
         )
 
 
@@ -133,7 +170,9 @@ class AssetExecutor:
             status=GenerationStatus.SUCCESS,
             width=asset.width,
             height=asset.height,
-            source_asset_id=source_asset.asset_id
+            source_asset_id=source_asset.asset_id,
+            created_at=self._created_at(),
+            provider_asset_url=None
         )
 
 
@@ -147,8 +186,23 @@ class AssetExecutor:
         self,
         asset: AssetRequirement
     ) -> list[GeneratedAsset]:
+
+        if (
+            not asset.generation_required
+            or asset.source_strategy != SourceStrategy.GENERATE
+        ):
+            return [
+                self.skipped_asset(
+                    asset
+                )
+            ]
         
-        if asset.asset_type == AssetType.IMAGE:
+        if asset.asset_type in {
+            AssetType.IMAGE,
+            AssetType.ILLUSTRATION,
+            AssetType.SVG_DIAGRAM,
+            AssetType.BACKGROUND,
+        }:
 
             result = await self.generate_image_asset(
                 asset
