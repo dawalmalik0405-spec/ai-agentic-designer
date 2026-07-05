@@ -99,7 +99,7 @@ async def asset_node(
     print("asset started ")
     agent = AssetAgent()
 
-    result = await agent.generate(
+    result = await agent.plan_assets(
         state["page_design_output"]
     )
 
@@ -114,12 +114,15 @@ async def asset_node(
 async def generation_node(
     state: WebsiteBuilderState
 ):
+    
+    print("gen started")
 
     agent = GenerationAgent()
 
     result = await agent.generate(
         state["asset_output"]
     )
+    print("gen finished ")
 
     return {
         "generated_asset_output": result
@@ -131,6 +134,7 @@ async def generation_node(
 async def frame_extraction_node(
     state: WebsiteBuilderState
 ):
+    print("frame started")
 
     agent = FrameExtractionAgent()
 
@@ -138,6 +142,7 @@ async def frame_extraction_node(
         state["generated_asset_output"]
     )
 
+    print("frame finished")
     return {
         "frame_extraction_output": result
     }
@@ -148,10 +153,13 @@ async def frame_extraction_node(
 async def code_node(
     state: WebsiteBuilderState
 ):
+    
+    print("code started ")
 
     agent = CodeAgent()
 
     code_input = CodeGenerationInput(
+        user_prompt=state["user_prompt"],
         architect_output=state["architect_output"],
         research_output=state["research_output"],
         design_output=state["design_system_output"],
@@ -164,6 +172,8 @@ async def code_node(
     result = await agent.generate(
         code_input
     )
+
+    print("code finished ")
 
     return {
         "generated_code": result
