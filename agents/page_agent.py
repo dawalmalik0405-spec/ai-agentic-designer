@@ -1,6 +1,6 @@
 from schema.desighn import DesignSystemOutput
 from schema.architect import ArchitectOutput
-from schema.page_d import PageDesignOutput
+from schema.page_d import PageDesignOutput, PageDesign, GlobalDesignRules
 
 from langchain_core.messages import (
     SystemMessage,
@@ -50,10 +50,65 @@ Every section must:
 
 Use the design system strictly.
 
-Return only valid PageDesignOutput.
+Return ONLY valid JSON.
+Do not include markdown.
+Do not wrap JSON in code fences.
+The JSON must exactly match one PageDesign object.
+Do not return PageDesignOutput.
+Do not include global_rules.
+Do not add extra wrapper keys like page_design, design, or page.
+
+The top-level object must contain only:
+page_name, page_goal, priority, sections.
+
+Every section must contain:
+order, section_name, section_goal, layout, visual_style, components, animations, interactions, content_priority.
+
+Every component must contain:
+component, variant, purpose, style.
+
+Arrays must be arrays.
+Strings must be strings.
+Numbers must be numbers.
+Design only the single page blueprint provided by the user message.
+
+Valid JSON example:
+
+{
+  "page_name": "Homepage",
+  "page_goal": "Introduce the product and guide visitors toward the primary conversion action.",
+  "priority": "high",
+  "sections": [
+    {
+      "order": 1,
+      "section_name": "Hero",
+      "section_goal": "Communicate the core value proposition immediately.",
+      "layout": "Full-width hero with headline, supporting copy, CTA group, and product visual.",
+      "visual_style": "Premium modern layout with strong contrast and restrained motion.",
+      "components": [
+        {
+          "component": "Button",
+          "variant": "primary",
+          "purpose": "Drive the main conversion action.",
+          "style": "High-contrast filled button with subtle hover animation."
+        }
+      ],
+      "animations": [
+        "Fade in headline and CTA group on page load."
+      ],
+      "interactions": [
+        "Primary CTA opens the conversion flow."
+      ],
+      "content_priority": [
+        "Headline",
+        "Primary CTA",
+        "Product visual",
+        "Trust signal"
+      ]
+    }
+  ]
+}
 """
-
-
 
 
 
@@ -61,12 +116,8 @@ Return only valid PageDesignOutput.
 class PageAgent:
 
   def __init__(self):
-    self.model = (
-                reason_llm()
-                .with_structured_output(
-                    PageDesignOutput
-                )
-            )
+    self.model = reason_llm()
+
     
 
 
@@ -81,54 +132,64 @@ class PageAgent:
         "Starting page design generation"
     )
 
-    messages = [
+    pages = []
 
-        SystemMessage(
-            content=SYSTEM_PROMPT
+    for page_blueprint in architect_output.page_blueprints:
+
+      messages = [
+
+          SystemMessage(
+              content=SYSTEM_PROMPT
+          ),
+
+          HumanMessage(
+              content=f"""
+          Project:
+          {architect_output.project_summary.model_dump_json(indent=2)}
+
+          Page Blueprint:
+          {page_blueprint.model_dump_json(indent=2)}
+
+          Design System:
+
+          Colors:
+          {design_output.colors.model_dump_json(indent=2)}
+
+          Typography:
+          {design_output.typography.model_dump_json(indent=2)}
+
+          Spacing:
+          {design_output.spacing.model_dump_json(indent=2)}
+
+          Create only this one PageDesign JSON object.
+          """
+          )
+      ]
+
+
+      prompt = messages[1].content
+
+      print(
+          f"Page prompt size for {page_blueprint.name}: {len(prompt)} characters"
+      )
+
+      response = await self.model.ainvoke(messages)
+
+      print(response.content)
+
+      page = PageDesign.model_validate_json(
+          response.content
+      )
+
+      pages.append(page)
+
+    result = PageDesignOutput(
+        global_rules=GlobalDesignRules(
+            navigation_style="Sticky top navigation with concise links and one primary CTA.",
+            footer_style="Structured footer with product, company, resource, and legal links.",
+            transition_style="Subtle fade and slide transitions between pages."
         ),
-
-        HumanMessage(
-            content=f"""
-        Website Architecture
-
-        Project:
-        {architect_output.project_summary}
-
-        Pages:
-        {architect_output.page_blueprints}
-
-        Motion Direction:
-        {architect_output.motion_direction}
-
-        Design System
-
-        Colors:
-        {design_output.colors}
-
-        Typography:
-        {design_output.typography}
-
-        Spacing:
-        {design_output.spacing}
-
-        Motion:
-        {design_output.motion}
-
-        Component Guidelines:
-        {design_output.component_guidelines}
-
-        Design complete page blueprints.
-        """
-        )
-    ]
-
-
-    prompt = messages[1].content
-
-    print(f"Prompt size: {len(prompt)} characters")
-
-    result = await self.model.ainvoke(
-        messages
+        pages=pages
     )
 
     if not result.pages:
