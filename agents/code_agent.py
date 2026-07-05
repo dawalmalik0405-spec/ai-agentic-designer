@@ -57,6 +57,20 @@ Filesystem rules:
 - If a write fails because a directory is missing, create the missing parent directory first, then retry once.
 
 Return a concise summary of the files written.
+
+After writing all required files, do not inspect or modify further.
+Return final answer immediately with a concise list of files written.
+Do not call directory_tree after final writes.
+Create all required directories before writing files:
+generated_site/src
+generated_site/src/components
+generated_site/src/pages
+generated_site/src/hooks
+generated_site/src/lib
+generated_site/src/assets
+generated_site/public
+generated_site/assets
+generated_site/assets/images
 """
 
 
@@ -82,6 +96,8 @@ class CodeAgent:
             os.path.join(OUTPUT_DIR, "src", "lib"),
             os.path.join(OUTPUT_DIR, "src", "assets"),
             os.path.join(OUTPUT_DIR, "public"),
+            os.path.join(OUTPUT_DIR, "assets"),
+            os.path.join(OUTPUT_DIR, "assets", "images"),
         ]:
             os.makedirs(
                 directory,
@@ -122,7 +138,6 @@ class CodeAgent:
                 "filesystem"
             ],
             system_prompt=SYSTEM_PROMPT,
-            max_steps=20
+            max_steps=60
         )
     
-
