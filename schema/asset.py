@@ -51,7 +51,7 @@ class AssetRequirement(BaseModel):
 
     negative_prompt: str | None = None
 
-    style_keywords: List[str] = []
+    style_keywords: List[str] | None = None
 
     animation_required: bool = False
 
