@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from schema.architect import ArchitectOutput
 
 from agents.llm import deepseek_llm
+from agents.resilient_llm import resilient_ainvoke
 import asyncio
 import json
 from pydantic import ValidationError
@@ -214,6 +215,16 @@ Animation:
 
 Create a complete website architecture.
 
+Unless the user explicitly asks for a single-page website, one-page site,
+or landing page only, create a multi-page architecture with 3 to 5 pages.
+
+For a product, SaaS, portfolio, agency, startup, or business website,
+include a Homepage plus relevant supporting pages such as Pricing,
+About, Contact, Features, Showcase, Blog, or Case Studies.
+
+Do not collapse all website goals into Homepage unless the request clearly
+requires a single-page landing experience.
+
 Stay at a strategic level.
 
 Do not provide implementation details.
@@ -249,6 +260,15 @@ Research Sources To Consider:
 - One Page Love
 - SaaSFrame
 - v0 by Vercel
+- jitter.video
+- Iconsax.io
+- Anime.js
+- ui verse
+- lenis
+- Spline
+- barba js 
+- vengence ui
+- ui lora 
 
 When creating research requirements,
 generate search queries that help discover:
@@ -288,7 +308,11 @@ Return a detailed ArchitectOutput.
 
         print("Calling LLM...")
 
-        response = await self.model.ainvoke(messages)
+        response = await resilient_ainvoke(
+            self.model,
+            messages,
+            "architect_output_json"
+        )
 
         print(response.content)
 
