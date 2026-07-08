@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 PLANNING_MODEL = os.getenv("PLANNING_MODEL", "mistralai/mistral-small-4-119b-2603")
 
-REASONING_MODEL = os.getenv("REASON_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
+REASONING_MODEL = os.getenv("REASON_MODEL", "minimaxai/minimax-m2.7")
 
 RESEARCH_MODEL = os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile")
-CODE_MODEL = os.getenv("CODE_MODEL", "qwen/qwen3-next-80b-a3b-instruct")
+CODE_MODEL = os.getenv("CODE_MODEL", "openai/gpt-oss-20b")
 
 
 def _build_nvidia_llm(model_name: str, temperature: float):
@@ -48,16 +48,6 @@ def deepseek_llm():
 
 def qwen_llm():
     return _build_nvidia_llm(CODE_MODEL, temperature=0.7)
-
-
-def research_llm():
-    llm = ChatGroq(
-        api_key=os.getenv("GROQ_API_KEY"),
-        model=os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile"),
-        temperature=0
-    )
-    
-    return llm
 
 
 
