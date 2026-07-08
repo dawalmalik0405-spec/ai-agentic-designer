@@ -1,13 +1,24 @@
-from schema.asset import AssetOutput
+from schema.asset import (
+    AssetOutput,
+    AssetPriority,
+    AssetRequirement,
+    AssetType,
+    SourceStrategy,
+)
 from schema.page_d import PageDesignOutput
+from agents.json_utils import extract_json_object, load_model_json
 
-from agents.llm import reason_llm
+from agents.llm import reason_llm, deepseek_llm
+from agents.resilient_llm import resilient_ainvoke
 
 from langchain_core.messages import (
     SystemMessage,
     HumanMessage
 )
+import os
+import logging
 
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an elite Digital Asset Planner.
@@ -33,14 +44,14 @@ You only create an asset plan.
 
 Determine:
 
-- images
-- videos
+- essential images
+- essential videos only when the page explicitly needs media playback
 - icons
 - diagrams
 - illustrations
 - logos
-- lottie animations
-- background assets
+- lottie animations only when the page explicitly needs reusable animated UI media
+- section background assets only when they materially improve the page
 
 For every asset define:
 
@@ -83,6 +94,21 @@ Prompts should be directly usable by:
 Avoid vague prompts.
 
 Every generated asset must have a highly detailed prompt.
+
+Asset volume rules:
+
+- Create only assets that the final UI must visibly use.
+- Maximum 6 generated assets per page.
+- Prefer 3 to 5 generated assets per page for normal pages.
+- Do not generate one asset for every card, icon, button, badge, or decorative element.
+- Use icon_library for icons and UI symbols.
+- Use logo_library for logos, partner marks, customer marks, and social logos.
+- Use CSS, Tailwind, and GSAP for hover animations, scroll reveals, parallax, glows, and transitions.
+- Do not create video or lottie assets just because a section has animations.
+- Create video only for a hero/product demo/background media section that explicitly needs video playback.
+- Create lottie only for a specific reusable animated illustration or interface micro-animation.
+- For scroll motion, parallax motion, card reveals, CTA hover, section transitions, and navigation motion, set animation_required true on the relevant visual asset when useful, but let the Code Agent implement the motion with GSAP.
+- Generated assets must look premium, product-ready, clean, and high-end.
 
 Return ONLY valid JSON matching AssetOutput.
 Do not include markdown.
@@ -162,40 +188,204 @@ class AssetAgent:
 
   def __init__(self):
     
-    self.model = reason_llm()
-        
+    self.model = deepseek_llm()
 
 
-  async def plan_assets(
+  def _normalize_asset_payload(
       self,
-      page_output:PageDesignOutput
-  ) -> AssetOutput:
-    
-      messages = [
-         
-         SystemMessage(
-            
-            content=SYSTEM_PROMPT
-            
-         ),
+      payload: dict
+  ) -> dict:
 
-         HumanMessage(
-            content=f"""
+      for asset in payload.get("assets", []):
+          if not isinstance(asset, dict):
+              continue
+
+          if asset.get("style_keywords") is None:
+              asset["style_keywords"] = []
+
+          if asset.get("asset_type") == "lottie_animation":
+              asset["asset_type"] = "lottie"
+
+          if asset.get("source_strategy") == "generated":
+              asset["source_strategy"] = "generate"
+
+          if not asset.get("source_strategy"):
+              asset["source_strategy"] = "client_provided"
+
+          if asset.get("source_strategy") in {
+              "icon_library",
+              "logo_library",
+              "internet",
+              "client_provided",
+          }:
+              asset["generation_required"] = False
+
+          if asset.get("source_strategy") == "generate":
+              asset["generation_required"] = bool(
+                  asset.get("prompt")
+              )
+
+          if "generation_required" not in asset:
+              asset["generation_required"] = False
+
+          if (
+              asset.get("generation_required") is True
+              and not asset.get("prompt")
+          ):
+              asset["generation_required"] = False
+              asset["source_strategy"] = "client_provided"
+
+          if asset.get("generation_required") is False:
+              if asset.get("prompt") in ("", None):
+                  asset["prompt"] = None
+
+          if not asset.get("negative_prompt"):
+              asset["negative_prompt"] = None
+
+          if not asset.get("animation_description"):
+              asset["animation_description"] = None
+
+          if not asset.get("source_output_filename"):
+              asset["source_output_filename"] = None
+
+          if "animation_required" not in asset:
+              asset["animation_required"] = False
+
+      return payload
+
+
+  async def _parse_asset_output_with_retry(
+      self,
+      messages: list,
+      page_name: str
+  ) -> AssetOutput:
+
+      max_attempts = int(
+          os.getenv(
+              "ASSET_JSON_ATTEMPTS",
+              "4"
+          )
+      )
+      previous_content = ""
+      previous_error = ""
+
+      for attempt in range(1, max_attempts + 1):
+          current_messages = messages
+
+          if previous_error:
+              try:
+                  previous_json = extract_json_object(
+                      previous_content
+                  )
+              except Exception:
+                  previous_json = previous_content[:4000]
+
+              current_messages = [
+                  messages[0],
+                  HumanMessage(
+                      content=(
+                          messages[1].content
+                          + f"""
+
+Previous asset JSON was invalid.
+
+Validation error:
+{previous_error}
+
+Previous invalid JSON:
+{previous_json}
+
+Repair instructions:
+- Return the complete corrected AssetOutput JSON object.
+- Every asset must include generation_required as true or false.
+- Every asset must include all required fields.
+- Do not return only the broken asset.
+- Do not include explanation.
+"""
+                      )
+                  )
+              ]
+
+          response = await resilient_ainvoke(
+              self.model,
+              current_messages,
+              "asset_plan_output_json"
+          )
+
+          previous_content = response.content
+
+          try:
+              payload = load_model_json(
+                  response.content
+              )
+              payload = self._normalize_asset_payload(
+                  payload
+              )
+
+              return AssetOutput.model_validate(
+                  payload
+              )
+          except Exception as error:
+              previous_error = str(error)
+              logger.warning(
+                  "Asset JSON validation failed",
+                  extra={
+                      "page": page_name,
+                      "attempt": attempt,
+                      "max_attempts": max_attempts,
+                      "error_type": type(error).__name__,
+                      "error": previous_error
+                  }
+              )
+
+              if attempt >= max_attempts:
+                  raise
+
+      raise RuntimeError(
+          f"Failed to generate valid AssetOutput for {page_name}"
+      )
+
+
+  async def _plan_assets_for_page(
+      self,
+      page_output: PageDesignOutput
+  ) -> AssetOutput:
+
+      page_name = page_output.pages[0].page_name
+      print(
+          f"Asset prompt page: {page_name}"
+      )
+
+      user_prompt = f"""
 
               Page Design:
 
               {page_output.model_dump_json(indent=2)}
 
-              Determine every asset required.
+              Determine every asset required for this page only.
               Avoid duplicate assets.
 
               Reuse assets whenever possible.
 
-              Only create assets that are actually
-              required by the page design.
+              Only create assets that are actually required by the page design.
+              Keep this page asset plan small and implementation-friendly.
 
-              Do not generate decorative assets
-              without purpose.
+              Asset count limits:
+              - Maximum 6 generated assets for this page.
+              - Prefer 3 to 5 generated assets.
+              - Do not generate assets for every card, badge, icon, button, or small decorative element.
+              - Use icon_library for normal UI icons.
+              - Use logo_library for logos and customer/partner marks.
+
+              Animation and motion rules:
+              - Scroll reveals, parallax, hover glows, section transitions, navigation motion, and CTA feedback must be implemented later with GSAP/CSS.
+              - Do not create video or lottie assets just because animations are listed.
+              - Create asset_type "video" only if the page design explicitly needs video playback or cinematic product media.
+              - Create asset_type "lottie" only if the page design explicitly needs reusable animated UI media.
+              - When an image/background should participate in parallax or scroll motion, set animation_required true and describe the GSAP motion in animation_description.
+
+              Do not generate decorative assets without purpose.
+              Every generated asset must be premium, high-end, polished, and visible in the final UI.
 
               For each asset decide:
 
@@ -210,15 +400,115 @@ class AssetAgent:
 
 
             """
+
+      messages = [
+         
+         SystemMessage(
+            
+            content=SYSTEM_PROMPT
+            
+         ),
+
+         HumanMessage(
+            content=user_prompt
          )
 
       ]
 
 
-      response = await self.model.ainvoke(messages)
+      return await self._parse_asset_output_with_retry(
+          messages,
+          page_name
+      )
+        
 
-      result = AssetOutput.model_validate_json(
-            response.content
+
+  async def plan_assets(
+      self,
+      page_output:PageDesignOutput
+  ) -> AssetOutput:
+
+      page_asset_outputs: list[AssetOutput] = []
+
+      for page in page_output.pages:
+          single_page_output = PageDesignOutput(
+              global_rules=page_output.global_rules,
+              pages=[
+                  page
+              ]
+          )
+          page_asset_outputs.append(
+              await self._plan_assets_for_page(
+                  single_page_output
+              )
+          )
+
+      merged_assets: list[AssetRequirement] = []
+      seen_asset_ids: set[str] = set()
+
+      for output in page_asset_outputs:
+          for asset in output.assets:
+              asset_id = asset.asset_id
+              if asset_id in seen_asset_ids:
+                  asset_id = (
+                      f"{asset.page_name.lower().replace(' ', '_')}_"
+                      f"{asset.section_name.lower().replace(' ', '_')}_"
+                      f"{asset.asset_id}"
+                  )
+                  asset = asset.model_copy(
+                      update={
+                          "asset_id": asset_id
+                      }
+                  )
+
+              seen_asset_ids.add(
+                  asset_id
+              )
+              merged_assets.append(
+                  asset
+              )
+
+      result = AssetOutput(
+          project_style=(
+              page_asset_outputs[0].project_style
+              if page_asset_outputs
+              else "Generated website"
+          ),
+          design_theme=(
+              page_asset_outputs[0].design_theme
+              if page_asset_outputs
+              else "Generated visual system"
+          ),
+          assets=merged_assets
+      )
+
+      generated_by_page: dict[str, int] = {}
+      capped_assets: list[AssetRequirement] = []
+
+      for asset in result.assets:
+          page_key = asset.page_name.lower()
+          is_generated = (
+              asset.source_strategy == SourceStrategy.GENERATE
+              and asset.generation_required
+          )
+
+          if is_generated:
+              generated_count = generated_by_page.get(
+                  page_key,
+                  0
+              )
+              if generated_count >= 6:
+                  continue
+              generated_by_page[page_key] = generated_count + 1
+
+          capped_assets.append(
+              asset
+          )
+
+      result = result.model_copy(
+          update={
+              "assets": capped_assets
+          }
       )
 
       if not result.assets:
