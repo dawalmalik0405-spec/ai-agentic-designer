@@ -215,12 +215,27 @@ Animation:
 
 Create a complete website architecture.
 
+First analyze the user request and infer the actual website type, audience,
+business model, user journey, conversion goal, and content needs.
+
+Create page_blueprints based on that analysis, not from a fixed template.
+
 Unless the user explicitly asks for a single-page website, one-page site,
 or landing page only, create a multi-page architecture with 3 to 5 pages.
 
 For a product, SaaS, portfolio, agency, startup, or business website,
-include a Homepage plus relevant supporting pages such as Pricing,
-About, Contact, Features, Showcase, Blog, or Case Studies.
+include a Homepage plus only the supporting pages that are relevant to the
+specific user request.
+
+Examples:
+- SaaS/product: Homepage, Features, Pricing, Customers/Case Studies, Contact.
+- Portfolio: Homepage, Work/Projects, About, Services, Contact.
+- Restaurant: Homepage, Menu, Reservations, Gallery, Contact.
+- Event: Homepage, Schedule, Speakers/Guests, Tickets, Venue.
+- E-commerce: Homepage, Collection/Product pages, About, Support/Contact.
+
+Do not add Pricing, Blog, About, Contact, Features, Showcase, or Case Studies
+unless they make sense for the user's prompt.
 
 Do not collapse all website goals into Homepage unless the request clearly
 requires a single-page landing experience.
@@ -332,38 +347,38 @@ Return a detailed ArchitectOutput.
 
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    import time
+#     import time
 
-    print("Creating Architect Agent...")
+#     print("Creating Architect Agent...")
 
-    agent = ArchitectAgent()
+#     agent = ArchitectAgent()
 
-    print("Running Architecture Generation...")
+#     print("Running Architecture Generation...")
 
-    start = time.time()
+#     start = time.time()
 
-    result = asyncio.run(
-        agent.build_architecture(
-            prompt="""
-            Build a premium AI startup website
-            for autonomous AI agents.
-            """,
-            selected_style="glassmorphism"
-        )
-    )
+#     result = asyncio.run(
+#         agent.build_architecture(
+#             prompt="""
+#             Build a premium AI startup website
+#             for autonomous AI agents.
+#             """,
+#             selected_style="glassmorphism"
+#         )
+#     )
 
-    print(
-        f"Architect time: "
-        f"{time.time() - start:.2f}s"
-    )
+#     print(
+#         f"Architect time: "
+#         f"{time.time() - start:.2f}s"
+#     )
 
-    print(
-        result.model_dump_json(
-            indent=2
-        )
-    )
+#     print(
+#         result.model_dump_json(
+#             indent=2
+#         )
+#     )
 
 #     with open(
 #         "architect_output.json",
