@@ -16,21 +16,18 @@ import logging
 
 
 from agents.llm import deepseek_llm
+from agents.json_utils import load_model_json
+from agents.resilient_llm import resilient_ainvoke
 
 logger = logging.getLogger(__name__)
-
-
-
 
 SYSTEM_PROMPT = """
 You are an elite Design System Architect.
 
 Your job is NOT to design pages.
-
 Your job is to create a reusable design system.
 
 You must create:
-
 - color system
 - typography system
 - spacing system
@@ -39,9 +36,16 @@ You must create:
 - component guidelines
 - design principles
 
+CRITICAL REQUIREMENT:
+The design system MUST be ultra-premium, modern, and state-of-the-art.
+- Use Apple/Vercel/Linear style aesthetics. Choose either a light or dark theme based on the user prompt and design direction.
+- If the prompt calls for premium night mode, use rich dark palettes and high-contrast glassmorphism.
+- If the prompt calls for bright, clean, or elegant editorial styling, use light palettes with soft neutrals and refined shadows.
+- Typography must be sophisticated, with tight leading, sharp contrast, and well-defined typographic scales.
+- Motion must include parallax effects, smooth staggering, and advanced GSAP concepts.
+- Avoid flat, generic SaaS styling. The output must WOW the user.
 
 Do NOT generate:
-
 - CSS
 - Tailwind classes
 - React code
@@ -49,10 +53,7 @@ Do NOT generate:
 - implementation snippets
 
 Describe systems and design decisions only.
-
 The Code Agent will handle implementation.
-
-
 
 Use:
 
@@ -218,6 +219,138 @@ class DesigningAgent:
     def __init__(self):
   
         self.model = deepseek_llm()
+
+    @staticmethod
+    def default_motion_rule(
+        duration: str,
+        description: str
+    ) -> dict:
+
+        return {
+            "duration": duration,
+            "easing": "cubic-bezier(0.16, 1, 0.3, 1)",
+            "description": description,
+        }
+
+    @staticmethod
+    def normalize_motion_patterns(
+        values
+    ) -> list[dict]:
+
+        normalized = []
+
+        for value in values or []:
+            if isinstance(value, str):
+                normalized.append(
+                    {
+                        "name": value,
+                        "description": value,
+                        "implementation": "Use restrained opacity, transform, or state-based motion.",
+                    }
+                )
+                continue
+
+            if not isinstance(value, dict):
+                continue
+
+            name = str(
+                value.get("name")
+                or value.get("title")
+                or "Motion pattern"
+            )
+            description = str(
+                value.get("description")
+                or value.get("details")
+                or name
+            )
+            implementation = str(
+                value.get("implementation")
+                or value.get("code")
+                or "Use restrained opacity, transform, or state-based motion."
+            )
+
+            normalized.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "implementation": implementation,
+                }
+            )
+
+        return normalized
+
+    def normalize_design_payload(
+        self,
+        payload: dict
+    ) -> dict:
+
+        motion = payload.setdefault(
+            "motion",
+            {}
+        )
+
+        motion.setdefault(
+            "page_transition",
+            self.default_motion_rule(
+                "240ms",
+                "Fast page-level transition."
+            )
+        )
+        motion.setdefault(
+            "hover_animation",
+            self.default_motion_rule(
+                "160ms",
+                "Subtle hover feedback for interactive elements."
+            )
+        )
+        motion.setdefault(
+            "reveal_animation",
+            self.default_motion_rule(
+                "420ms",
+                "Reveal content with opacity and slight vertical movement."
+            )
+        )
+        motion.setdefault(
+            "section_reveal",
+            self.default_motion_rule(
+                "520ms",
+                "Stagger section content as it enters the viewport."
+            )
+        )
+        motion.setdefault(
+            "hero_animation",
+            self.default_motion_rule(
+                "700ms",
+                "Introduce hero content with polished entrance motion."
+            )
+        )
+
+        motion["scroll_patterns"] = self.normalize_motion_patterns(
+            motion.get("scroll_patterns")
+        )
+        motion["interaction_patterns"] = self.normalize_motion_patterns(
+            motion.get("interaction_patterns")
+        )
+
+        if not motion["scroll_patterns"]:
+            motion["scroll_patterns"] = [
+                {
+                    "name": "Section reveal",
+                    "description": "Reveal sections as they enter the viewport.",
+                    "implementation": "Use opacity and translate motion.",
+                }
+            ]
+
+        if not motion["interaction_patterns"]:
+            motion["interaction_patterns"] = [
+                {
+                    "name": "CTA hover",
+                    "description": "Buttons respond with restrained motion.",
+                    "implementation": "Use scale, border, or shadow change.",
+                }
+            ]
+
+        return payload
                 
 
 
@@ -275,12 +408,24 @@ class DesigningAgent:
 
 
 
-            response = await self.model.ainvoke(messages)
+            response = await resilient_ainvoke(
+                self.model,
+                messages,
+                "design_system_output_json"
+            )
 
             print(response.content)
 
-            result = DesignSystemOutput.model_validate_json(
+            payload = load_model_json(
                 response.content
+            )
+
+            payload = self.normalize_design_payload(
+                payload
+            )
+
+            result = DesignSystemOutput.model_validate(
+                payload
             )
 
             
