@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from schema.asset import (
@@ -25,11 +26,16 @@ from .storage.asset_storage import (
 
 
 
+logger = logging.getLogger(__name__)
+
+
 class AssetExecutor:
 
     def __init__(self):
 
         self.provider = PollinationsProvider()
+        self.video_provider_name = "pollinations"
+        self.video_provider = self.provider
         self.storage = AssetStorage()
 
 
@@ -72,6 +78,37 @@ class AssetExecutor:
         )
 
 
+    def failed_asset(
+        self,
+        asset: AssetRequirement,
+        error: Exception
+    ) -> GeneratedAsset:
+
+        logger.warning(
+            "Asset generation degraded gracefully",
+            extra={
+                "asset_id": asset.asset_id,
+                "asset_type": asset.asset_type.value,
+                "provider": "pollinations",
+                "error_type": type(error).__name__,
+                "error": str(error)
+            }
+        )
+
+        return GeneratedAsset(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            file_path="",
+            provider="pollinations",
+            status=GenerationStatus.FAILED,
+            width=asset.width,
+            height=asset.height,
+            error=str(error),
+            created_at=self._created_at(),
+            provider_asset_url=None
+        )
+
+
 
     async def generate_image_asset(
         self,
@@ -85,7 +122,9 @@ class AssetExecutor:
             )
         
         image_bytes = await self.provider.generate_image(
-            asset.prompt
+            asset.prompt,
+            width=asset.width,
+            height=asset.height
         )
 
         image_path = await self.storage.save_image(
@@ -116,11 +155,15 @@ class AssetExecutor:
             )
 
         image_url = await self.provider.generate_image_url(
-            asset.prompt
+            asset.prompt,
+            width=asset.width,
+            height=asset.height
         )
 
         image_bytes = await self.provider.generate_image(
-            asset.prompt
+            asset.prompt,
+            width=asset.width,
+            height=asset.height
         )
 
 
@@ -134,13 +177,16 @@ class AssetExecutor:
         )
 
 
+        video_prompt = (
+            asset.animation_description
+            or asset.prompt
+        )
+
         video_bytes = await self.provider.generate_video(
-            prompt=(
-                asset.animation_description
-                or asset.prompt
-            ),
+            prompt=video_prompt,
             image_url=image_url
         )
+        video_provider = "pollinations"
 
         video_path = await self.storage.save_video(
             video_bytes,
@@ -166,7 +212,7 @@ class AssetExecutor:
             asset_id=asset.asset_id,
             asset_type=AssetType.VIDEO,
             file_path=video_path,
-            provider="pollinations",
+            provider=video_provider,
             status=GenerationStatus.SUCCESS,
             width=asset.width,
             height=asset.height,
@@ -204,18 +250,32 @@ class AssetExecutor:
             AssetType.BACKGROUND,
         }:
 
-            result = await self.generate_image_asset(
-                asset
-            )
+            try:
+                result = await self.generate_image_asset(
+                    asset
+                )
+            except Exception as error:
+                result = self.failed_asset(
+                    asset,
+                    error
+                )
 
             return [result]
         
 
         if asset.asset_type == AssetType.VIDEO:
 
-            return await self.generate_video_asset(
-                asset
-            )
+            try:
+                return await self.generate_video_asset(
+                    asset
+                )
+            except Exception as error:
+                return [
+                    self.failed_asset(
+                        asset,
+                        error
+                    )
+                ]
         
         
         return []
@@ -250,6 +310,33 @@ class AssetExecutor:
         generated_assets = await self.execute_assets(
             assets
         )
+
+        required_generated_assets = [
+            asset
+            for asset in assets
+            if (
+                asset.generation_required
+                and asset.source_strategy == SourceStrategy.GENERATE
+            )
+        ]
+        successful_generated_assets = [
+            asset
+            for asset in generated_assets
+            if asset.status == GenerationStatus.SUCCESS
+        ]
+
+        if required_generated_assets and not successful_generated_assets:
+            failed_errors = [
+                f"{asset.asset_id}: {asset.error}"
+                for asset in generated_assets
+                if asset.status == GenerationStatus.FAILED
+            ]
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Asset generation failed for every required generated asset. "
+                + "; ".join(failed_errors[:10])
+            )
 
         return GeneratedAssetOutput(
             assets=generated_assets

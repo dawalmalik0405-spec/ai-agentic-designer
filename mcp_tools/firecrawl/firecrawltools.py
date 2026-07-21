@@ -1,15 +1,31 @@
+import logging
+
 from mcp_tools.initialize_mcps import create_mcp_client
+from mcp_tools.resilience import ProviderResilience
+
+
+logger = logging.getLogger(__name__)
 
 
 class FirecrawlService:
 
-    def __init__(self):
+    def __init__(
+        self,
+        resilience: ProviderResilience | None = None
+    ):
 
         self.client = create_mcp_client(
             allowed_servers=["firecrawl"]
         )
 
         self.session = None
+        self.resilience = (
+            resilience
+            or ProviderResilience.from_env(
+                "firecrawl",
+                logger=logger
+            )
+        )
 
     async def connect(self):
 
@@ -45,12 +61,15 @@ async def search_website(
         
         session = await service.connect()
 
-        result = await session.call_tool(
-            "firecrawl_search",
-            {
-                "query": query,
-                "limit":limit
-            }
+        result = await service.resilience.execute(
+            "search",
+            lambda: session.call_tool(
+                "firecrawl_search",
+                {
+                    "query": query,
+                    "limit":limit
+                }
+            )
         )
 
         return result
@@ -74,12 +93,15 @@ async def scrape_website(
         
         session = await service.connect()
 
-        result = await session.call_tool(
-            "firecrawl_scrape",
-            {
-                "url":url,
-                "formats":["markdown"]
-            }
+        result = await service.resilience.execute(
+            "scrape",
+            lambda: session.call_tool(
+                "firecrawl_scrape",
+                {
+                    "url":url,
+                    "formats":["markdown"]
+                }
+            )
         )
 
         return result
@@ -106,12 +128,15 @@ async def crawl_website(
         
         session = await service.connect()
 
-        result = await session.call_tool(
-            "firecrawl_crawl",
-            {
-                "url":url,
-                "limit":limit
-            }
+        result = await service.resilience.execute(
+            "crawl",
+            lambda: session.call_tool(
+                "firecrawl_crawl",
+                {
+                    "url":url,
+                    "limit":limit
+                }
+            )
         )
 
         return result

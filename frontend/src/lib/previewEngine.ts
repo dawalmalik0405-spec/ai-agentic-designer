@@ -187,7 +187,7 @@ function buildPreviewDocument(compiledScript: string) {
 
       try {
         const runtimePayloadNode = document.getElementById("preview-runtime-data");
-        const runtimeSource = runtimePayloadNode ? JSON.parse(runtimePayloadNode.textContent || "\"\"") : "";
+        const runtimeSource = runtimePayloadNode ? JSON.parse(runtimePayloadNode.textContent || '""') : "";
         const runtimeBlob = new Blob([runtimeSource], { type: "text/javascript" });
         const runtimeUrl = URL.createObjectURL(runtimeBlob);
         const runtimeScript = document.createElement("script");

@@ -13,7 +13,7 @@ from typing import Any
 from dotenv import load_dotenv
 from mcp_use import MCPAgent, MCPClient, session
 
-from agents.llm import (CODE_MODEL, deepseek_llm, qwen_llm)
+from agents.llm import CODE_MODEL, deepseek_llm, mcp_code_llm
 
 CURRENT_DIR = os.path.dirname(__file__)
 PACKAGE_ROOT = os.path.dirname(CURRENT_DIR)
@@ -109,7 +109,7 @@ async def run_mcp_agent(
     max_steps: int = 12,
 ) -> str:
     if llm is None:
-        llm = CODE_MODEL
+        llm = mcp_code_llm()
 
 
     client = create_mcp_client(

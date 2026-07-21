@@ -1,5 +1,5 @@
 from schema.code import CodeGenerationInput
-from agents.llm import gemini_flash_llm
+from agents.llm import gemini_flash_llm, mcp_code_llm
 from agents.resilient_llm import resilient_ainvoke
 from mcp_tools.initialize_mcps import run_mcp_agent
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -90,6 +90,7 @@ STYLE_GUIDANCE = {
 class PageCodeAgent:
     def __init__(self):
         self.model = gemini_flash_llm()
+        self.mcp_model = mcp_code_llm()
 
     def _module_name(self, name: str) -> str:
         words = re.findall(r"[A-Za-z0-9]+", name)
@@ -185,6 +186,47 @@ export default {{
             f.write(config.strip())
         return filepath
 
+    @staticmethod
+    def _is_dark_hex_color(color: str) -> bool:
+        if not isinstance(color, str) or not color.startswith("#"):
+            return False
+        hex_value = color.lstrip("#")
+        if len(hex_value) == 3:
+            hex_value = "".join(ch * 2 for ch in hex_value)
+        if len(hex_value) != 6:
+            return False
+        try:
+            r = int(hex_value[0:2], 16)
+            g = int(hex_value[2:4], 16)
+            b = int(hex_value[4:6], 16)
+        except ValueError:
+            return False
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        return brightness < 128
+
+    def _write_index_css(self, design_output=None) -> str:
+        background = "#f8fafc"
+        text = "#0f172a"
+        if design_output:
+            background = getattr(design_output.colors, "background", background)
+            text = getattr(design_output.colors, "surface", text)
+            if self._is_dark_hex_color(background):
+                text = getattr(design_output.colors, "dark_surface", "#f7f2e8")
+        css = f"""@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {{ font-family: Inter, system-ui, sans-serif; color: {text}; background: {background}; }}
+* {{ box-sizing: border-box; }}
+html, body, #root {{ min-height: 100%; margin: 0; }}
+body {{ min-width: 320px; }}
+"""
+        filepath = os.path.join(OUTPUT_DIR, "src", "index.css")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(css)
+        return filepath
+
     def _create_project_shell(self, state: dict) -> str:
         """Create stable shared files without spending an MCP tool-call turn."""
         directories = [
@@ -203,6 +245,7 @@ export default {{
             {
                 "module": self._module_name(page.page_name),
                 "route": self._route_path(index=index, page_name=page.page_name),
+                "label": page.page_name,
             }
             for index, page in enumerate(pages)
         ]
@@ -228,7 +271,7 @@ export default {{
                 "lenis": "^1.1.18",
                 "react": "^18.3.1",
                 "react-dom": "^18.3.1",
-                "react-router": "^7.1.1",
+                "react-router-dom": "^7.1.1",
             },
             "devDependencies": {
                 "@types/node": "^22.10.2",
@@ -273,17 +316,33 @@ export default defineConfig({ plugins:[react()], resolve:{ alias:{"@":path.resol
 """,
             "src/main.tsx": f'''import {{ StrictMode }} from "react";
 import {{ createRoot }} from "react-dom/client";
-import {{ BrowserRouter, Route, Routes }} from "react-router";
+import {{ BrowserRouter, Route, Routes, Navigate }} from "react-router-dom";
 import "./index.css";
 {imports}
-createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter><Routes>
+
+const App = () => (
+  <div className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="p-4">
+      <Routes>
 {routes}
-</Routes></BrowserRouter></StrictMode>);
+        <Route path="*" element={{<Navigate to="/" replace />}} />
+      </Routes>
+    </main>
+  </div>
+);
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>,
+);
 ''',
             "src/index.css": """@tailwind base;
 @tailwind components;
 @tailwind utilities;
-:root { font-family: Inter, system-ui, sans-serif; color: #f7f2e8; background: #07080b; }
+:root { font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
 """,
@@ -334,6 +393,7 @@ export { Card } from "./Card";
                 "page_name": page.page_name,
                 "module": self._module_name(page.page_name),
                 "route": self._route_path(index=index, page_name=page.page_name),
+                "label": page.page_name,
                 "goal": page.page_goal,
             }
             for index, page in enumerate(state["page_design_output"].pages)
@@ -342,6 +402,9 @@ export { Card } from "./Card";
         design_output = state.get("design_system_output")
         if design_output:
             self._write_tailwind_config(design_output)
+            self._write_index_css(design_output)
+        else:
+            self._write_index_css()
 
         os.makedirs(os.path.join(OUTPUT_DIR, "src", "components"), exist_ok=True)
         os.makedirs(os.path.join(OUTPUT_DIR, "src", "pages"), exist_ok=True)
@@ -363,7 +426,7 @@ export { Card } from "./Card";
                 "lenis": "^1.1.18",
                 "react": "^18.3.1",
                 "react-dom": "^18.3.1",
-                "react-router": "^7.1.1",
+                "react-router-dom": "^7.1.1",
             },
             "devDependencies": {
                 "@types/react": "^18.3.12",
@@ -377,12 +440,12 @@ export { Card } from "./Card";
             },
         }
 
-        routes = "\n".join(
-            f'          <Route path={json.dumps(page["route"])} element={{<{page["module"]} />}} />'
-            for page in pages_summary
-        )
         imports = "\n".join(
             f'import {page["module"]} from "./pages/{page["module"]}";'
+            for page in pages_summary
+        )
+        routes = "\n".join(
+            f'          <Route path={json.dumps(page["route"])} element={{<{page["module"]} />}} />'
             for page in pages_summary
         )
 
@@ -448,16 +511,25 @@ export default defineConfig({
 """,
             "src/main.tsx": f'''import {{ StrictMode }} from "react";
 import {{ createRoot }} from "react-dom/client";
-import {{ BrowserRouter, Route, Routes }} from "react-router";
+import {{ BrowserRouter, Route, Routes, Navigate }} from "react-router-dom";
 import "./index.css";
 {imports}
+
+const App = () => (
+  <div className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="p-4">
+      <Routes>
+{routes}
+        <Route path="*" element={{<Navigate to="/" replace />}} />
+      </Routes>
+    </main>
+  </div>
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <Routes>
-{routes}
-      </Routes>
+      <App />
     </BrowserRouter>
   </StrictMode>,
 );
@@ -466,7 +538,7 @@ createRoot(document.getElementById("root")!).render(
 @tailwind components;
 @tailwind utilities;
 
-:root { font-family: Inter, system-ui, sans-serif; color: #f7f2e8; background: #07080b; }
+:root { font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
 body { min-width: 320px; }
@@ -521,6 +593,31 @@ export { Card } from "./Card";
         style_key = state.get("selected_style", "glassmorphism")
         style_instruction = STYLE_GUIDANCE.get(style_key, STYLE_GUIDANCE["glassmorphism"])
 
+        design_output = state.get("design_system_output")
+        design_system_text = ""
+        if design_output:
+            design_system_text = f"""
+Design system:
+Colors:
+{design_output.colors.model_dump_json(indent=2)}
+Typography:
+{design_output.typography.model_dump_json(indent=2)}
+Spacing:
+{design_output.spacing.model_dump_json(indent=2)}
+Radius:
+{design_output.radius.model_dump_json(indent=2)}
+Shadows:
+{design_output.shadows.model_dump_json(indent=2)}
+Component guidelines:
+{[c.model_dump_json(indent=2) for c in design_output.component_guidelines]}
+"""
+
+        pages = state["page_design_output"].pages
+        site_navigation = "\n".join(
+            f"- {self._route_path(index=index, page_name=page.page_name)}: {page.page_name}"
+            for index, page in enumerate(pages)
+        )
+
         prompt = f"""
 Generate exactly one complete React TSX page component.
 
@@ -533,6 +630,14 @@ User request:
 Page blueprint:
 {page.model_dump_json(indent=2)}
 
+Site navigation:
+{site_navigation}
+
+If the site includes more than one page, include page-to-page navigation inside this page using react-router-dom. You can use:
+- <Link to="/other-page">Go to Other Page</Link>
+- or useNavigate() to navigate programmatically on button click.
+
+{design_system_text}
 Style guidance ({style_key}):
 {style_instruction}
 """
@@ -542,8 +647,10 @@ Style guidance ({style_key}):
 
         prompt += f"""
 Requirements:
-- Return only the complete TSX source code. Do not call tools, inspect files, explain your work, or use markdown fences.
-- Import ONLY from: React, gsap, framer-motion, react-router, and existing components from '../components/Button', '../components/Card'
+- Return only the complete TSX source code. Do not inspect files, explain your work, or use markdown fences.
+- Use the design system colors, typography, spacing, shadows, and component guidelines to determine whether the page should use a light or dark theme.
+- Do not force a dark background. Choose light or dark styling based on the user prompt and design system.
+- Import ONLY from: React, react-router-dom, gsap, framer-motion, and existing components from '../components/Button', '../components/Card'
 - You can import Button and Card like this:
   import Button from '../components/Button';
   import Card from '../components/Card';
@@ -554,25 +661,46 @@ Requirements:
 - Use placehold.co URLs for all images since assets are not generated yet.
 - IMPORTANT: Tag EVERY placeholder <img> element with `data-asset-id="unique_id"` and `data-asset-prompt="Highly detailed description of what the generated image should be, matching the design theme"`. Example:
   <img src="https://placehold.co/800x600" data-asset-id="{module_name.lower()}_hero_bg" data-asset-prompt="Premium dark minimalist dashboard background, tech aesthetic, 4k" className="..." />
+- If this page is part of a multi-page website, include a Websites navigation tab or page-to-page links/buttons so users can move between generated pages.
 - Implement every section from PAGE BLUEPRINT in order.
 - Use GSAP for page animations (scroll reveals, card reveals, hover effects, section transitions).
+- Use the heroui-react MCP server only for creating reusable React components and component implementation details.
+- Do not treat the heroui-react MCP server as a full-page generator. The page structure should be composed locally from components that the MCP helps implement.
 - Do not include image-dependent animations (like parallax) for placeholder images yet. Parallax will be injected later.
 - Only include abstract background animations (like canvas particle nets or gradient blobs) if the selected style explicitly calls for them.
 - Export default {module_name}.
 - Do not rely on a Tailwind configuration file. Use standard Tailwind utility classes only.
 """
 
-        response = await resilient_ainvoke(
-            self.model,
-            [
-                SystemMessage(content="You are a senior frontend engineer. Return only valid, complete TSX source code."),
-                HumanMessage(content=prompt),
-            ],
-            "generate_single_page_code",
-        )
-        code = self._extract_tsx(response)
+        code = None
+
+        try:
+            response_text = await run_mcp_agent(
+                prompt=prompt,
+                allowed_servers=["heroui-react"],
+                system_prompt="You are a senior frontend engineer. Return only valid, complete TSX source code.",
+                llm=self.model,
+                max_steps=20,
+            )
+            code = self._extract_tsx(response_text)
+            logger.info("Generated page source via heroui-react MCP: %s", page_path)
+        except Exception as mcp_exc:
+            logger.warning(
+                "heroui-react MCP generation failed: %s. Falling back to local model.",
+                mcp_exc,
+            )
+            response = await resilient_ainvoke(
+                self.model,
+                [
+                    SystemMessage(content="You are a senior frontend engineer. Return only valid, complete TSX source code."),
+                    HumanMessage(content=prompt),
+                ],
+                "generate_single_page_code",
+            )
+            code = self._extract_tsx(response)
+            logger.info("Generated page source directly: %s", page_path)
+
         os.makedirs(os.path.dirname(page_path), exist_ok=True)
         with open(page_path, "w", encoding="utf-8") as page_file:
             page_file.write(code + "\n")
-        logger.info("Generated page source directly: %s", page_path)
-        return f"Generated {page_path} directly."
+        return f"Generated {page_path}."

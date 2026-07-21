@@ -6,7 +6,6 @@ from agents.designing_agent import DesigningAgent
 from agents.page_agent import PageAgent
 from agents.asset_agent import AssetAgent
 from agents.gen_agent import GenerationAgent
-from agents.code_agent import CodeAgent
 from agents.frame_extraction_agent import FrameExtractionAgent
 
 from mcp_tools.frame_extraction.extractor import ( FrameExtractor )
@@ -80,7 +79,7 @@ async def page_node(
     print("page started")
     agent = PageAgent()
 
-    result = await agent.design_pages(
+    result = await agent.design_single_page(
         architect_output=state["architect_output"],
         design_output=state["design_system_output"]
     )
@@ -150,31 +149,32 @@ async def frame_extraction_node(
 
 
 
-async def code_node(
+
+async def assembly_node(
     state: WebsiteBuilderState
 ):
+    print("assembly started ")
+    from agents.asset_injection_agent import AssetInjectionAgent
+    import os
     
-    print("code started ")
-
-    agent = CodeAgent()
-
-    code_input = CodeGenerationInput(
-        user_prompt=state["user_prompt"],
-        architect_output=state["architect_output"],
-        research_output=state["research_output"],
-        design_output=state["design_system_output"],
-        page_output=state["page_design_output"],
-        asset_output=state["asset_output"],
-        generated_asset_output=state["generated_asset_output"],
-        frame_extraction_output=state["frame_extraction_output"]
-    )
-
-    result = await agent.generate(
-        code_input
-    )
-
-    print("code finished ")
-
+    injector = AssetInjectionAgent()
+    
+    assets_mapping = {}
+    if state.get("generated_asset_output"):
+        for asset in state["generated_asset_output"].assets:
+            if asset.status.value == "success" and asset.file_path:
+                filename = os.path.basename(asset.file_path)
+                assets_mapping[asset.asset_id] = f"/assets/{filename}"
+                
+    # Inject into each page
+    if state.get("page_design_output"):
+        for page in state["page_design_output"].pages:
+            try:
+                await injector.inject_assets_to_page(state, page.page_name, assets_mapping)
+            except Exception as e:
+                print(f"Failed to inject assets into page {page.page_name}: {e}")
+                
+    print("assembly finished ")
     return {
-        "generated_code": result
+        "generated_code": "Assets successfully injected into pages."
     }
