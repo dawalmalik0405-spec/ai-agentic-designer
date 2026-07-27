@@ -11,10 +11,7 @@ from node.nodes import (
     research_node,
     design_node,
     page_node,
-    asset_node,
-    generation_node,
-    frame_extraction_node,
-    assembly_node
+    asset_node
 )
 
 import asyncio
@@ -34,15 +31,11 @@ PIPELINE_NODES = [
     ("design", "Creating design system", design_node),
     ("page", "Designing page blueprints", page_node),
     ("asset", "Planning visual assets", asset_node),
-    ("generation", "Generating visual assets", generation_node),
-    ("frame_extraction", "Extracting motion frames", frame_extraction_node),
-    ("assembly", "Assembling final project", assembly_node),
 ]
 
-# The draft stage deliberately stops before assets or code are produced.  It is
-# used by the review UI so a user can approve the page structure first.
-DESIGN_PIPELINE_NODES = PIPELINE_NODES[:4]
-BUILD_PIPELINE_NODES = PIPELINE_NODES[5:]
+# The draft stage deliberately stops after asset planning.
+# Asset generation and injection are now handled manually or autonomously by the frontend Asset Studio.
+DESIGN_PIPELINE_NODES = PIPELINE_NODES
 
 
 builder = StateGraph(
@@ -74,24 +67,6 @@ builder.add_node(
     asset_node
 )
 
-builder.add_node(
-    "generation",
-    generation_node
-)
-
-builder.add_node(
-    "frame_extraction",
-    frame_extraction_node
-)
-
-builder.add_node(
-    "assembly",
-    assembly_node
-)
-
-
-
-
 builder.add_edge(
     START,
     "architect"
@@ -119,21 +94,6 @@ builder.add_edge(
 
 builder.add_edge(
     "asset",
-    "generation"
-)
-
-builder.add_edge(
-    "generation",
-    "frame_extraction"
-)
-
-builder.add_edge(
-    "frame_extraction",
-    "assembly"
-)
-
-builder.add_edge(
-    "assembly",
     END
 )
 
@@ -239,26 +199,6 @@ async def plan_assets_async(
 ) -> WebsiteBuilderState:
     update = await asset_node(state)
     state.update(update)
-    return state
-
-
-async def run_approved_build_async(
-    state: WebsiteBuilderState
-) -> WebsiteBuilderState:
-    if state.get("asset_output") is None:
-        raise ValueError("Assets must be selected before code generation.")
-
-    build_nodes = BUILD_PIPELINE_NODES
-    if state.get("generated_asset_output") is not None:
-        build_nodes = [
-            item for item in BUILD_PIPELINE_NODES
-            if item[0] != "generation"
-        ]
-
-    for _, _, node in build_nodes:
-        update = await node(state)
-        state.update(update)
-
     return state
 
 

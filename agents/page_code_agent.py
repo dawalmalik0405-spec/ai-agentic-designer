@@ -1,6 +1,6 @@
 from schema.code import CodeGenerationInput
 from agents.llm import gemini_flash_llm, mcp_code_llm
-from agents.resilient_llm import resilient_ainvoke
+from pipeline_utils import resilient_ainvoke
 from mcp_tools.initialize_mcps import run_mcp_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 import os
@@ -215,7 +215,7 @@ export default {{
         css = f"""@tailwind base;
 @tailwind components;
 @tailwind utilities;
-
+ 
 :root {{ font-family: Inter, system-ui, sans-serif; color: {text}; background: {background}; }}
 * {{ box-sizing: border-box; }}
 html, body, #root {{ min-height: 100%; margin: 0; }}
@@ -226,6 +226,71 @@ body {{ min-width: 320px; }}
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(css)
         return filepath
+
+    def _build_page_info(self, pages) -> list[dict[str, str]]:
+        page_info = []
+        for index, page in enumerate(pages):
+            page_info.append(
+                {
+                    "module": self._module_name(page.page_name),
+                    "route": self._route_path(index=index, page_name=page.page_name),
+                    "label": page.page_name,
+                }
+            )
+        return page_info
+
+    def _build_main_tsx(self, page_info: list[dict[str, str]]) -> str:
+        imports = "\n".join(
+            f'import {item["module"]} from "./pages/{item["module"]}";'
+            for item in page_info
+        )
+        routes = "\n".join(
+            f'        <Route path={json.dumps(item["route"])} element={{<{item["module"]} />}} />'
+            for item in page_info
+        )
+        nav_items = "\n".join(
+            (
+                "          <NavLink\n"
+                f'            key={json.dumps(item["route"])}\n'
+                f'            to={item["route"]}\n'
+                '            className={({ isActive }) => (isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : "rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}\n'
+                "          >\n"
+                f'            {json.dumps(item["label"])}\n'
+                "          </NavLink>"
+            )
+            for item in page_info
+        )
+
+        return f'''import {{ StrictMode }} from "react";
+import {{ createRoot }} from "react-dom/client";
+import {{ BrowserRouter, NavLink, Route, Routes, Navigate }} from "react-router-dom";
+import "./index.css";
+{imports}
+
+const App = () => (
+  <div className="min-h-screen bg-slate-50 text-slate-900">
+    <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur">
+      <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3">
+{nav_items}
+      </nav>
+    </header>
+    <main className="p-4">
+      <Routes>
+{routes}
+        <Route path="*" element={{<Navigate to="/" replace />}} />
+      </Routes>
+    </main>
+  </div>
+);
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>,
+);
+'''
 
     def _create_project_shell(self, state: dict) -> str:
         """Create stable shared files without spending an MCP tool-call turn."""
@@ -241,22 +306,7 @@ body {{ min-width: 320px; }}
             os.makedirs(os.path.join(OUTPUT_DIR, directory), exist_ok=True)
 
         pages = state["page_design_output"].pages
-        page_info = [
-            {
-                "module": self._module_name(page.page_name),
-                "route": self._route_path(index=index, page_name=page.page_name),
-                "label": page.page_name,
-            }
-            for index, page in enumerate(pages)
-        ]
-        imports = "\n".join(
-            f'import {item["module"]} from "./pages/{item["module"]}";'
-            for item in page_info
-        )
-        routes = "\n".join(
-            f'        <Route path={json.dumps(item["route"])} element={{<{item["module"]} />}} />'
-            for item in page_info
-        )
+        page_info = self._build_page_info(pages)
 
         package = {
             "name": "generated-website",
@@ -314,31 +364,7 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 export default defineConfig({ plugins:[react()], resolve:{ alias:{"@":path.resolve(__dirname,"src")} } });
 """,
-            "src/main.tsx": f'''import {{ StrictMode }} from "react";
-import {{ createRoot }} from "react-dom/client";
-import {{ BrowserRouter, Route, Routes, Navigate }} from "react-router-dom";
-import "./index.css";
-{imports}
-
-const App = () => (
-  <div className="min-h-screen bg-slate-50 text-slate-900">
-    <main className="p-4">
-      <Routes>
-{routes}
-        <Route path="*" element={{<Navigate to="/" replace />}} />
-      </Routes>
-    </main>
-  </div>
-);
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
-''',
+            "src/main.tsx": self._build_main_tsx(page_info),
             "src/index.css": """@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -509,31 +535,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
 });
 """,
-            "src/main.tsx": f'''import {{ StrictMode }} from "react";
-import {{ createRoot }} from "react-dom/client";
-import {{ BrowserRouter, Route, Routes, Navigate }} from "react-router-dom";
-import "./index.css";
-{imports}
-
-const App = () => (
-  <div className="min-h-screen bg-slate-50 text-slate-900">
-    <main className="p-4">
-      <Routes>
-{routes}
-        <Route path="*" element={{<Navigate to="/" replace />}} />
-      </Routes>
-    </main>
-  </div>
-);
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
-''',
+            "src/main.tsx": self._build_main_tsx(pages_summary),
             "src/index.css": """@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -612,6 +614,25 @@ Component guidelines:
 {[c.model_dump_json(indent=2) for c in design_output.component_guidelines]}
 """
 
+        asset_plan_text = ""
+        asset_output = state.get("asset_output")
+        if asset_output:
+            page_assets = [
+                asset
+                for asset in asset_output.assets
+                if getattr(asset, "page_name", page_name) == page_name
+            ]
+            if page_assets:
+                asset_plan_text = "Planned asset slots for this page:\n" + "\n".join(
+                    (
+                        f"- asset_id: {asset.asset_id}\n"
+                        f"  section: {getattr(asset, 'section_name', '')}\n"
+                        f"  prompt: {getattr(asset, 'prompt', '')}\n"
+                        f"  size: {getattr(asset, 'width', '')}x{getattr(asset, 'height', '')}"
+                    )
+                    for asset in page_assets
+                )
+
         pages = state["page_design_output"].pages
         site_navigation = "\n".join(
             f"- {self._route_path(index=index, page_name=page.page_name)}: {page.page_name}"
@@ -629,6 +650,8 @@ User request:
 
 Page blueprint:
 {page.model_dump_json(indent=2)}
+
+{asset_plan_text}
 
 Site navigation:
 {site_navigation}
@@ -659,6 +682,8 @@ Requirements:
   import {{ Card }} from '../components/Card';
 - For other custom components you need, create them inline within this file as reusable React components.
 - Use placehold.co URLs for all images since assets are not generated yet.
+- IMPORTANT: If planned asset slots are listed above, create one placeholder <img> or <video> location for each planned asset that is visually appropriate for its section.
+- IMPORTANT: Use the exact planned `asset_id` values as `data-asset-id`. Do not rename, merge, or invent different IDs for planned assets.
 - IMPORTANT: Tag EVERY placeholder <img> element with `data-asset-id="unique_id"` and `data-asset-prompt="Highly detailed description of what the generated image should be, matching the design theme"`. Example:
   <img src="https://placehold.co/800x600" data-asset-id="{module_name.lower()}_hero_bg" data-asset-prompt="Premium dark minimalist dashboard background, tech aesthetic, 4k" className="..." />
 - If this page is part of a multi-page website, include a Websites navigation tab or page-to-page links/buttons so users can move between generated pages.

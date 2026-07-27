@@ -3,7 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from schema.architect import ArchitectOutput
 
 from agents.llm import deepseek_llm
-from agents.resilient_llm import resilient_ainvoke
+from pipeline_utils import resilient_ainvoke
 import asyncio
 import json
 from pydantic import ValidationError
@@ -23,7 +23,7 @@ Do NOT generate:
 - exact animations
 - exact interactions
 - exact component behavior
-- exact content
+- exact content,
 - exact copywriting
 - exact visual effects
 - exact implementation details
