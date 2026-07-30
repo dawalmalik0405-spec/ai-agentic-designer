@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "firecrawl-mcp@latest"],
       "env": {
-        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
+        "FIRECRAWL_API_KEY": "fc-8c1bda4647c0426f91a18d5cea67001f" ,
         "NODE_ENV": "production"
       }
     },
@@ -22,10 +22,9 @@
       ],
       "env": {}
     },
-    "playwright": {
+    "heroui-react": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"],
-      "env": {}
+      "args": ["-y", "@heroui/react-mcp@latest"]
     }
   }
 }

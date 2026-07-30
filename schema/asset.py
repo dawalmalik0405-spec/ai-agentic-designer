@@ -5,10 +5,8 @@ from enum import Enum
 
 class AssetType(str, Enum):
     IMAGE = "image"
-    VIDEO = "video"
     ICON = "icon"
     LOGO = "logo"
-    LOTTIE = "lottie"
     ILLUSTRATION = "illustration"
     SVG_DIAGRAM = "svg_diagram"
     BACKGROUND = "background"

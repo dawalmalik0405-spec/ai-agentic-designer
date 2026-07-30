@@ -682,7 +682,7 @@ Requirements:
   import {{ Card }} from '../components/Card';
 - For other custom components you need, create them inline within this file as reusable React components.
 - Use placehold.co URLs for all images since assets are not generated yet.
-- IMPORTANT: If planned asset slots are listed above, create one placeholder <img> or <video> location for each planned asset that is visually appropriate for its section.
+- IMPORTANT: If planned asset slots are listed above, create a placeholder <img> location for each planned asset that is visually appropriate for its section.
 - IMPORTANT: Use the exact planned `asset_id` values as `data-asset-id`. Do not rename, merge, or invent different IDs for planned assets.
 - IMPORTANT: Tag EVERY placeholder <img> element with `data-asset-id="unique_id"` and `data-asset-prompt="Highly detailed description of what the generated image should be, matching the design theme"`. Example:
   <img src="https://placehold.co/800x600" data-asset-id="{module_name.lower()}_hero_bg" data-asset-prompt="Premium dark minimalist dashboard background, tech aesthetic, 4k" className="..." />

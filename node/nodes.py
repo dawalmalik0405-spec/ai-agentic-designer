@@ -6,9 +6,6 @@ from agents.designing_agent import DesigningAgent
 from agents.page_agent import PageAgent
 from agents.asset_agent import AssetAgent
 from agents.gen_agent import GenerationAgent
-from agents.frame_extraction_agent import FrameExtractionAgent
-
-from mcp_tools.frame_extraction.extractor import ( FrameExtractor )
 
 from schema.code import CodeGenerationInput
 
@@ -130,21 +127,7 @@ async def generation_node(
 
 
 
-async def frame_extraction_node(
-    state: WebsiteBuilderState
-):
-    print("frame started")
 
-    agent = FrameExtractionAgent()
-
-    result = await agent.extract(
-        state["generated_asset_output"]
-    )
-
-    print("frame finished")
-    return {
-        "frame_extraction_output": result
-    }
 
 
 
@@ -153,28 +136,6 @@ async def frame_extraction_node(
 async def assembly_node(
     state: WebsiteBuilderState
 ):
-    print("assembly started ")
-    from agents.asset_injection_agent import AssetInjectionAgent
-    import os
-    
-    injector = AssetInjectionAgent()
-    
-    assets_mapping = {}
-    if state.get("generated_asset_output"):
-        for asset in state["generated_asset_output"].assets:
-            if asset.status.value == "success" and asset.file_path:
-                filename = os.path.basename(asset.file_path)
-                assets_mapping[asset.asset_id] = f"/assets/{filename}"
-                
-    # Inject into each page
-    if state.get("page_design_output"):
-        for page in state["page_design_output"].pages:
-            try:
-                await injector.inject_assets_to_page(state, page.page_name, assets_mapping)
-            except Exception as e:
-                print(f"Failed to inject assets into page {page.page_name}: {e}")
-                
-    print("assembly finished ")
     return {
-        "generated_code": "Assets successfully injected into pages."
+        "generated_code": "Asset injection has been removed from the pipeline."
     }

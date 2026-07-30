@@ -275,7 +275,6 @@ Research Sources To Consider:
 - One Page Love
 - SaaSFrame
 - v0 by Vercel
-- jitter.video
 - Iconsax.io
 - Anime.js
 - ui verse

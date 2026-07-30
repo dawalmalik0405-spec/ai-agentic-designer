@@ -34,8 +34,6 @@ class AssetExecutor:
     def __init__(self):
 
         self.provider = PollinationsProvider()
-        self.video_provider_name = "pollinations"
-        self.video_provider = self.provider
         self.storage = AssetStorage()
 
 
@@ -144,89 +142,6 @@ class AssetExecutor:
             provider_asset_url=None
         )
     
-    async def generate_video_asset(
-        self,
-        asset: AssetRequirement
-    ) -> list[GeneratedAsset]:
-        
-        if not asset.prompt:
-            raise ValueError(
-                f"Asset {asset.asset_id} has no prompt"
-            )
-
-        image_url = await self.provider.generate_image_url(
-            asset.prompt,
-            width=asset.width,
-            height=asset.height
-        )
-
-        image_bytes = await self.provider.generate_image(
-            asset.prompt,
-            width=asset.width,
-            height=asset.height
-        )
-
-
-        source_filename = (
-            f"{asset.asset_id}_source.jpg"
-        )
-
-        source_path = await self.storage.save_image(
-            image_bytes,
-            source_filename
-        )
-
-
-        video_prompt = (
-            asset.animation_description
-            or asset.prompt
-        )
-
-        video_bytes = await self.provider.generate_video(
-            prompt=video_prompt,
-            image_url=image_url
-        )
-        video_provider = "pollinations"
-
-        video_path = await self.storage.save_video(
-            video_bytes,
-            asset.output_filename
-        )
-
-
-        source_asset = GeneratedAsset(
-            asset_id=f"{asset.asset_id}_source",
-            asset_type=AssetType.IMAGE,
-            file_path=source_path,
-            provider="pollinations",
-            status=GenerationStatus.SUCCESS,
-            width=asset.width,
-            height=asset.height,
-            created_at=self._created_at(),
-            provider_asset_url=None
-        )
-
-
-
-        video_asset = GeneratedAsset(
-            asset_id=asset.asset_id,
-            asset_type=AssetType.VIDEO,
-            file_path=video_path,
-            provider=video_provider,
-            status=GenerationStatus.SUCCESS,
-            width=asset.width,
-            height=asset.height,
-            source_asset_id=source_asset.asset_id,
-            created_at=self._created_at(),
-            provider_asset_url=None
-        )
-
-
-        return [
-            source_asset,
-            video_asset
-        ]
-    
 
     async def execute_asset(
         self,
@@ -261,22 +176,6 @@ class AssetExecutor:
                 )
 
             return [result]
-        
-
-        if asset.asset_type == AssetType.VIDEO:
-
-            try:
-                return await self.generate_video_asset(
-                    asset
-                )
-            except Exception as error:
-                return [
-                    self.failed_asset(
-                        asset,
-                        error
-                    )
-                ]
-        
         
         return []
     

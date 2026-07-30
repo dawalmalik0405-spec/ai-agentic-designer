@@ -11,8 +11,6 @@ export interface AssetPlan {
   width: number
   height: number
   url?: string
-  is_parallax?: boolean
-  is_video?: boolean
 }
 
 /** Shape returned by GET /design-sessions/{id}/pages/placements */
@@ -22,6 +20,81 @@ export interface PagePlacement {
 }
 
 type PlacementOption = Pick<AssetPlan, "asset_id" | "page_name" | "section_name">
+
+function flattenPlacements(placements: PagePlacement[]): PlacementOption[] {
+  return placements.flatMap((page) =>
+    page.sections.map((section) => ({
+      asset_id: section.asset_id,
+      page_name: page.page_name,
+      section_name: section.section_name,
+    }))
+  )
+}
+
+function fallbackPromptForPlacement(sitePrompt: string | undefined, placement: PlacementOption): string {
+  const basePrompt = sitePrompt?.trim()
+  const sectionName = placement.section_name || placement.asset_id.replace(/[_-]+/g, " ")
+  const pageName = placement.page_name || "page"
+
+  return [
+    `Create a high-quality website visual asset for the ${sectionName} section on ${pageName}.`,
+    basePrompt ? `Website context: ${basePrompt}` : "",
+    "Make it suitable for the selected section and keep it consistent with the generated UI style.",
+  ].filter(Boolean).join(" ")
+}
+
+function mergeAssetSources({
+  plannedAssets,
+  savedAssets,
+  placements,
+  sitePrompt,
+}: {
+  plannedAssets: AssetPlan[]
+  savedAssets: AssetPlan[]
+  placements: PagePlacement[]
+  sitePrompt?: string
+}): AssetPlan[] {
+  const byId = new Map<string, AssetPlan>()
+  const savedById = new Map(savedAssets.map((asset) => [asset.asset_id, asset]))
+
+  for (const asset of plannedAssets) {
+    const saved = savedById.get(asset.asset_id)
+    byId.set(asset.asset_id, {
+      ...asset,
+      ...(saved || {}),
+      target_asset_id: saved?.target_asset_id || asset.target_asset_id || asset.asset_id,
+    })
+  }
+
+  for (const placement of flattenPlacements(placements)) {
+    const existing =
+      byId.get(placement.asset_id) ||
+      plannedAssets.find((asset) => asset.target_asset_id === placement.asset_id)
+    const saved =
+      savedById.get(placement.asset_id) ||
+      (existing ? savedById.get(existing.asset_id) : undefined)
+
+    const assetId = existing?.asset_id || placement.asset_id
+    byId.set(assetId, {
+      asset_id: assetId,
+      page_name: placement.page_name,
+      section_name: placement.section_name,
+      target_asset_id: placement.asset_id,
+      prompt: existing?.prompt || saved?.prompt || fallbackPromptForPlacement(sitePrompt, placement),
+      width: existing?.width || saved?.width || 1920,
+      height: existing?.height || saved?.height || 1080,
+      url: saved?.url || existing?.url,
+    })
+  }
+
+  for (const saved of savedAssets) {
+    if (!byId.has(saved.asset_id)) {
+      byId.set(saved.asset_id, saved)
+    }
+  }
+
+  return Array.from(byId.values())
+}
 
 interface Props {
   sessionId?: string
@@ -64,7 +137,6 @@ function AddAssetModal({
       prompt: form.prompt.trim(),
       width: parseInt(form.width) || 1920,
       height: parseInt(form.height) || 1080,
-      is_parallax: false,
     })
     onClose()
   }
@@ -182,6 +254,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
   const [injecting, setInjecting] = useState(false)
   const [error, setError] = useState("")
   const [showAddModal, setShowAddModal] = useState(false)
+  const [autoGenerating, setAutoGenerating] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadTarget, setUploadTarget] = useState<string | null>(null)
   const [chatInputs, setChatInputs] = useState<Record<string, string>>({})
@@ -202,8 +275,9 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
       .catch(() => {})
   }, [sessionId])
 
-  // Load the server plan and merge the local draft so switching views does not
-  // discard generated URLs, uploads, custom prompts, or parallax choices.
+  // Load the server plan, generated page placements, and local draft together.
+  // Page placements are the source of truth for exact injection targets, so
+  // they still create asset cards when the planning endpoint is not ready.
   useEffect(() => {
     if (!sessionId) {
       const saved = sessionStorage.getItem(storageKey)
@@ -227,16 +301,23 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
         sessionStorage.removeItem(storageKey)
       }
     }
-    fetch(`/design-sessions/${sessionId}/assets/plan`)
-      .then((r) => r.json())
-      .then((data) => {
-        const savedById = new Map(savedAssets.map((asset) => [asset.asset_id, asset]))
-        setAssets((data.assets || []).map((asset: AssetPlan) => ({
-          ...asset,
-          ...(savedById.get(asset.asset_id) || {}),
-          is_parallax: savedById.get(asset.asset_id)?.is_parallax ?? false,
-          is_video: savedById.get(asset.asset_id)?.is_video ?? false,
-        })))
+    Promise.all([
+      fetch(`/design-sessions/${sessionId}/assets/plan`)
+        .then((r) => (r.ok ? r.json() : { assets: [] }))
+        .catch(() => ({ assets: [] })),
+      fetch(`/design-sessions/${sessionId}/pages/placements`)
+        .then((r) => (r.ok ? r.json() : { placements: [] }))
+        .catch(() => ({ placements: [] })),
+    ])
+      .then(([planData, placementData]) => {
+        const placements = placementData.placements || []
+        setLivePlacements(placements)
+        setAssets(mergeAssetSources({
+          plannedAssets: planData.assets || [],
+          savedAssets,
+          placements,
+          sitePrompt: prompt,
+        }))
         hydratedStorage.current = true
         setLoading(false)
       })
@@ -245,24 +326,22 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
         hydratedStorage.current = true
         setLoading(false)
       })
-  }, [sessionId, storageKey])
+  }, [sessionId, storageKey, prompt])
 
-  const injectAssetList = async (assetList: AssetPlan[]) => {
+  const approveAssetList = async (assetList: AssetPlan[]) => {
     if (!sessionId) return
     const payload = {
-      assets: assetList.filter((a) => a.url).map((a) => ({
-        asset_id: a.asset_id,
-        target_asset_id: a.target_asset_id || a.asset_id,
-        page_name: a.page_name,
-        is_parallax: !!a.is_parallax,
-      })),
+      asset_ids: assetList.filter((a) => a.url).map((a) => a.asset_id),
     }
-    const res = await fetch(`/design-sessions/${sessionId}/assets/inject`, {
+    const res = await fetch(`/design-sessions/${sessionId}/assets/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) return
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.detail || "Failed to approve assets")
+    }
     const data = await res.json()
     if (data.session) onSession?.(data.session)
   }
@@ -283,7 +362,6 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
         body: JSON.stringify({ 
           prompt: asset.prompt,
           edit_request: customPrompt,
-          is_video: asset.is_video,
           width: asset.width, 
           height: asset.height 
         }),
@@ -292,18 +370,28 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
       if (!res.ok) throw new Error(data.detail || "Failed to generate")
       setAssets((prev) => {
         const next = prev.map((a) => (a.asset_id === asset.asset_id ? { ...a, url: data.url, prompt: data.revised_prompt || finalPrompt } : a))
-        if (sessionId) {
-          setTimeout(() => injectAssetList(next), 500)
-        }
         return next
       })
-      
-      // Auto-inject if session exists to update the generated site. This is an
-      // intermediate asset action and must not clear the active design session.
     } catch (e: any) {
       setError(e.message || "Generation failed")
     } finally {
       setBusy(null)
+    }
+  }
+
+  const autoGenerateAll = async () => {
+    if (autoGenerating || !sessionId) return
+    setAutoGenerating(true)
+    setError("")
+    try {
+      // Create a static snapshot of what needs generating
+      const pending = assets.filter((a) => !a.url)
+      for (const asset of pending) {
+        // Sequential generation to avoid rate limits
+        await generateAsset(asset)
+      }
+    } finally {
+      setAutoGenerating(false)
     }
   }
 
@@ -327,9 +415,6 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
       if (!res.ok) throw new Error(data.detail || "Upload failed")
       setAssets((prev) => {
         const next = prev.map((a) => (a.asset_id === uploadTarget ? { ...a, url: data.url } : a))
-        if (sessionId) {
-          setTimeout(() => injectAssetList(next), 500)
-        }
         return next
       })
     } catch (e: any) {
@@ -341,31 +426,16 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
     }
   }
 
-  const toggleParallax = (asset_id: string) => {
-    setAssets((prev) =>
-      prev.map((a) => (a.asset_id === asset_id ? { ...a, is_parallax: !a.is_parallax } : a))
-    )
-  }
-
   const removeAsset = (asset_id: string) => {
     setAssets((prev) => prev.filter((a) => a.asset_id !== asset_id))
   }
 
-  const injectAndFinalizeSilent = async () => {
-    if (!sessionId) return
-    try {
-      await injectAssetList(assets)
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  const injectAndFinalize = async () => {
+  const approveAssets = async () => {
     if (!sessionId) return
     setInjecting(true)
     setError("")
     try {
-      await injectAndFinalizeSilent()
+      await approveAssetList(assets)
       onClose()
     } catch (e: any) {
       setError(e.message || "Something went wrong")
@@ -441,7 +511,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
           {assets.length > 0 && (
             <span className="text-sm text-[#6b7280]">{readyCount} / {assets.length} ready</span>
           )}
-          <button
+          {!sessionId && <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/8 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
           >
@@ -449,7 +519,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
             Add Asset
-          </button>
+          </button>}
           {sessionId && (
             <>
               <button
@@ -460,14 +530,21 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                 Skip Assets
               </button>
               <button
-                onClick={injectAndFinalize}
-                disabled={injecting || assets.length === 0}
+                onClick={autoGenerateAll}
+                disabled={injecting || autoGenerating || assets.filter(a => !a.url).length === 0}
+                className="rounded-lg border border-white/15 bg-[#d3ff72]/10 px-4 py-2 text-sm font-medium text-[#d3ff72] transition hover:bg-[#d3ff72]/20 disabled:opacity-50"
+              >
+                {autoGenerating ? "Generating..." : "Auto-Generate All"}
+              </button>
+              <button
+                onClick={approveAssets}
+                disabled={injecting || assets.length === 0 || readyCount !== assets.length}
                 className="flex items-center gap-2 rounded-lg bg-[#d3ff72] px-5 py-2 text-sm font-semibold text-[#12140f] transition hover:bg-[#c2f25b] disabled:opacity-50"
               >
                 {injecting ? (
-                  <><div className="h-4 w-4 animate-spin rounded-full border-2 border-t-transparent border-[#12140f]" />Injecting...</>
+                  <><div className="h-4 w-4 animate-spin rounded-full border-2 border-t-transparent border-[#12140f]" />Approving...</>
                 ) : (
-                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Inject & Finalize</>
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Approve Assets</>
                 )}
               </button>
             </>
@@ -505,7 +582,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                   : "Click \"Add Asset\" above to create your first image — no pages needed!"}
               </p>
             </div>
-            <button
+            {!sessionId && <button
               onClick={() => setShowAddModal(true)}
               className="mt-2 flex items-center gap-2 rounded-lg bg-[#d3ff72] px-6 py-2.5 text-sm font-semibold text-[#12140f] hover:bg-[#c2f25b]"
             >
@@ -513,7 +590,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
               Add Your First Asset
-            </button>
+            </button>}
           </div>
         ) : (
           <>
@@ -523,7 +600,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
               </h1>
               <p className="mt-1 text-sm text-[#6b7280]">
                 {sessionId
-                  ? "Generate or upload images for each placeholder, toggle parallax, then click Inject & Finalize."
+                  ? "Generate or upload each planned image, review it here, then approve the completed asset set."
                   : "Generate images freely. Click Add Asset to start, then use AI generation or upload your own."}
               </p>
             </div>
@@ -534,11 +611,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                   {/* Image preview */}
                   <div className="relative aspect-video overflow-hidden bg-black/50">
                     {asset.url ? (
-                      asset.url.endsWith(".mp4") ? (
-                        <video src={`${asset.url}?t=${Date.now()}`} autoPlay loop muted className="h-full w-full object-cover" />
-                      ) : (
-                        <img src={`${asset.url}?t=${Date.now()}`} alt={asset.prompt} className="h-full w-full object-cover" />
-                      )
+                      <img src={`${asset.url}?t=${Date.now()}`} alt={asset.prompt} className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-[#4a5260]">
                         <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -617,34 +690,14 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                           </select>
                         </div>
                         {asset.target_asset_id && (
-                          <p className="text-[10px] text-[#d3ff72]/70">✓ mapped to <span className="font-mono">{asset.target_asset_id}</span></p>
+                          <div className="mt-1 flex items-center justify-between">
+                            <p className="text-[10px] text-[#d3ff72]/70">✓ mapped to <span className="font-mono">{asset.target_asset_id}</span></p>
+                          </div>
                         )}
                       </div>
                     )}
 
                     <p className="mb-4 line-clamp-2 flex-1 text-xs text-[#a9b0bb]" title={asset.prompt}>{asset.prompt}</p>
-
-                    {/* Options */}
-                    <div className="mb-3 flex items-center gap-4">
-                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[#8a929e]">
-                        <div
-                          onClick={() => toggleParallax(asset.asset_id)}
-                          className={`relative h-4 w-7 rounded-full transition-colors ${asset.is_parallax ? "bg-[#d3ff72]" : "bg-white/15"}`}
-                        >
-                          <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${asset.is_parallax ? "translate-x-3" : "translate-x-0.5"}`} />
-                        </div>
-                        Parallax
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[#8a929e]">
-                        <div
-                          onClick={() => setAssets(prev => prev.map(a => a.asset_id === asset.asset_id ? { ...a, is_video: !a.is_video } : a))}
-                          className={`relative h-4 w-7 rounded-full transition-colors ${asset.is_video ? "bg-[#9d72ff]" : "bg-white/15"}`}
-                        >
-                          <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${asset.is_video ? "translate-x-3" : "translate-x-0.5"}`} />
-                        </div>
-                        Video Mode
-                      </label>
-                    </div>
 
                     {/* Chat Editing */}
                     <div className="mb-3 flex overflow-hidden rounded-md border border-white/10 bg-black/30 focus-within:border-[#d3ff72]/50">
@@ -679,9 +732,9 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                       <button
                         onClick={() => generateAsset(asset)}
                         disabled={busy !== null}
-                        className={`flex-1 rounded-md py-1.5 text-xs font-medium text-white transition hover:bg-white/15 disabled:opacity-40 ${asset.is_video ? "bg-[#9d72ff]/20 text-[#d9c2ff] hover:bg-[#9d72ff]/40" : "bg-white/8"}`}
+                        className={`flex-1 rounded-md py-1.5 text-xs font-medium text-white transition hover:bg-white/15 disabled:opacity-40 bg-white/8`}
                       >
-                        {busy === asset.asset_id ? "..." : (asset.is_video ? "Generate Video" : "Generate AI")}
+                        {busy === asset.asset_id ? "..." : "Generate AI"}
                       </button>
                       <button
                         onClick={() => triggerUpload(asset.asset_id)}
@@ -696,7 +749,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
               ))}
 
               {/* Add new card shortcut */}
-              <button
+              {!sessionId && <button
                 onClick={() => setShowAddModal(true)}
                 className="flex aspect-auto min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-white/10 bg-transparent text-[#4a5260] transition hover:border-[#d3ff72]/30 hover:text-[#d3ff72]"
               >
@@ -704,7 +757,7 @@ export default function AssetStudio({ sessionId, prompt, onClose, onSession, onG
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
                 <span className="text-sm font-medium">Add Asset</span>
-              </button>
+              </button>}
             </div>
           </>
         )}

@@ -19,10 +19,6 @@ class AssetStorage:
             "images"
         )
 
-        self.videos_dir = os.path.join(
-            asset_root,
-            "videos"
-        )
 
         self.metadata_dir = os.path.join(
             asset_root,
@@ -31,11 +27,6 @@ class AssetStorage:
 
         os.makedirs(
             self.images_dir,
-            exist_ok=True
-        )
-
-        os.makedirs(
-            self.videos_dir,
             exist_ok=True
         )
 
@@ -65,27 +56,6 @@ class AssetStorage:
 
         return path
     
-
-
-    async def save_video(
-        self,
-        video_bytes: bytes,
-        filename: str
-    ) -> str:
-
-        path = os.path.join(
-            self.videos_dir,
-            filename
-        )
-
-        with open(
-            path,
-            "wb"
-        ) as f:
-
-            f.write(video_bytes)
-
-        return path
     
 
 

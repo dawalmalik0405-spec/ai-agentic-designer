@@ -32,7 +32,7 @@ export interface WireframePage {
 
 export interface DesignSession {
   session_id: string
-  status: "wireframe_ready" | "page_code_review" | "pages_complete" | "asset_selection_ready" | "asset_options_ready" | "completed"
+  status: "wireframe_ready" | "page_code_review" | "pages_complete" | "asset_selection_ready" | "asset_options_ready" | "assets_approved" | "completed"
   prompt: string
   selected_style: string
   wireframe: { pages: WireframePage[] }
@@ -55,6 +55,7 @@ export interface DesignSession {
     source_asset_id?: string | null
   }>
   selected_asset_ids: string[]
+  approved_asset_ids?: string[]
   approved_pages: string[]
 }
 
