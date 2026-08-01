@@ -7,6 +7,7 @@ This module is intentionally stripped down so the agent can be rebuilt cleanly.
 from schema.architect import ArchitectOutput
 from schema.research import ResearchOutput
 from schema.desighn import DesignSystemOutput
+from pipeline_utils import resilient_ainvoke, parse_model_json, load_model_json
 from langchain_core.messages import (
     SystemMessage,
     HumanMessage
@@ -16,7 +17,7 @@ import logging
 
 
 from agents.llm import deepseek_llm
-from pipeline_utils import load_model_json, resilient_ainvoke
+
 
 logger = logging.getLogger(__name__)
 
