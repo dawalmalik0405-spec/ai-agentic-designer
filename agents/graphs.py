@@ -11,7 +11,8 @@ from node.nodes import (
     research_node,
     design_node,
     page_node,
-    asset_node
+    asset_node,
+    motion_node,          
 )
 
 import asyncio
@@ -25,17 +26,10 @@ GENERATED_SITE_DIR = os.path.join(
     "generated_site"
 )
 
-PIPELINE_NODES = [
-    ("architect", "Planning website architecture", architect_node),
-    ("research", "Researching references and patterns", research_node),
-    ("design", "Creating design system", design_node),
-    ("page", "Designing page blueprints", page_node),
-    ("asset", "Planning visual assets", asset_node),
-]
 
-# The draft stage deliberately stops after asset planning.
-# Asset generation and injection are now handled manually or autonomously by the frontend Asset Studio.
-DESIGN_PIPELINE_NODES = PIPELINE_NODES
+
+
+
 
 
 builder = StateGraph(
@@ -67,6 +61,11 @@ builder.add_node(
     asset_node
 )
 
+builder.add_node(
+    "motion",
+    motion_node
+)
+
 builder.add_edge(
     START,
     "architect"
@@ -94,6 +93,11 @@ builder.add_edge(
 
 builder.add_edge(
     "asset",
+    "motion"
+)
+
+builder.add_edge(
+    "motion",
     END
 )
 
@@ -114,8 +118,8 @@ def _initial_state(
         "design_system_output": None,
         "page_design_output": None,
         "asset_output": None,
+        "motion_output": None,
         "generated_asset_output": None,
-        "frame_extraction_output": None,
         "generated_code": None,
     }
 
@@ -169,37 +173,20 @@ async def run_graph_async(
     prompt: str,
     selected_style: str
 ) -> WebsiteBuilderState:
+
     state = _initial_state(
         prompt,
         selected_style
     )
 
-    for _, _, node in PIPELINE_NODES:
-        update = await node(state)
-        state.update(update)
+    result = await graph.ainvoke(state)
 
-    return state
+    return result
 
 
-async def run_design_preview_async(
-    prompt: str,
-    selected_style: str
-) -> WebsiteBuilderState:
-    state = _initial_state(prompt, selected_style)
-
-    for _, _, node in DESIGN_PIPELINE_NODES:
-        update = await node(state)
-        state.update(update)
-
-    return state
 
 
-async def plan_assets_async(
-    state: WebsiteBuilderState
-) -> WebsiteBuilderState:
-    update = await asset_node(state)
-    state.update(update)
-    return state
+
 
 
 def run_graph(
@@ -216,56 +203,19 @@ def run_graph(
 
 async def run_graph_events(
     prompt: str,
-    selected_style: str
+    selected_style: str,
 ):
-    state = _initial_state(
-        prompt,
-        selected_style
-    )
-    seen_files: set[str] = set()
+    state = _initial_state(prompt, selected_style)
 
-    for name, label, node in PIPELINE_NODES:
-        yield {
-            "type": "step",
-            "step": name,
-            "label": label,
-            "status": "started",
-        }
-
-        update = await node(state)
-
-        if name == "assembly":
-            for file_path in _generated_code_files():
-                if file_path in seen_files:
-                    continue
-                seen_files.add(file_path)
-                yield {
-                    "type": "file",
-                    "path": file_path,
-                    "status": "written",
-                }
-
-        state.update(update)
-
-        yield {
-            "type": "step",
-            "step": name,
-            "label": label,
-            "status": "completed",
-        }
-
-    yield {
-        "type": "state",
-        "status": "completed",
-        "state": state,
-    }
+    async for event in graph.astream(state):
+        yield event
 
 
 async def main():
 
     result = await run_graph_async(
-        prompt="Create a futuristic AI startup website",
-        selected_style="minimalism"
+        prompt="Create a futuristic AI startup website home page ",
+        selected_style="skeumorphism"
     )
 
     print(result)
