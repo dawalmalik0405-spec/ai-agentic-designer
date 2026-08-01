@@ -28,7 +28,7 @@ class PollinationsProvider:
         prompt: str,
         width: int = 1024,
         height: int = 1024,
-        model: str = "nanobanana-2",
+        model: str = "flux",
     ) -> bytes:
         """Generate an image from a text prompt using the free Pollinations endpoint."""
         if not prompt.strip():

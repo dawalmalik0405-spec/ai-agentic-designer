@@ -1,122 +1,161 @@
-import { useState } from "react"
-import ChatPanel from "./Components/ChatPanel"
-import PreviewPanel from "./Components/PreviewPanel"
-import { usePreviewStore } from "./store/previewStore"
-import AssetStudio from "./Components/AssetStudio"
+import React, { useEffect, useState } from 'react';
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import WorkspaceOverview from './components/WorkspaceOverview';
+import ChatPanel from './components/ChatPanel';
+import { Loader2 } from 'lucide-react';
 
-export type GeneratedFiles = Record<string, string>
-
-export interface GenerationMeta {
-  fileCount: number
-  pageCount: number
-  lastPrompt: string
-  previewUrl: string
-}
-
-export interface WireframeSection {
-  order: number
-  section_name: string
-  section_goal: string
-  layout: string
-  visual_style: string
-  animations: string[]
-  interactions: string[]
-}
-
-export interface WireframePage {
-  page_name: string
-  page_goal: string
-  priority: string
-  sections: WireframeSection[]
-}
-
-export interface DesignSession {
-  session_id: string
-  status: "wireframe_ready" | "page_code_review" | "pages_complete" | "asset_selection_ready" | "asset_options_ready" | "assets_approved" | "completed"
-  prompt: string
-  selected_style: string
-  wireframe: { pages: WireframePage[] }
-  asset_options?: {
-    assets: Array<{
-      asset_id: string
-      page_name: string
-      section_name: string
-      purpose: string
-      asset_type: string
-      generation_required: boolean
-    }>
-  }
-  generated_assets?: Array<{
-    asset_id: string
-    asset_type: string
-    file_path: string
-    preview_url: string
-    status: string
-    source_asset_id?: string | null
-  }>
-  selected_asset_ids: string[]
-  approved_asset_ids?: string[]
-  approved_pages: string[]
+interface Project {
+  id: string;
+  name: string;
+  pages: number;
+  status: string;
+  last_updated: string;
 }
 
 export default function App() {
-  const setFiles = usePreviewStore((state) => state.setFiles)
-  const [meta, setMeta] = useState<GenerationMeta>({
-    fileCount: 0,
-    pageCount: 0,
-    lastPrompt: "",
-    previewUrl: ""
-  })
-  const [designSession, setDesignSession] = useState<DesignSession | null>(null)
-  const [activeScreen, setActiveScreen] = useState<"design" | "asset-studio">("design")
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'chats' | 'assets' | 'settings'>('dashboard');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
-  const handleGenerated = (nextFiles: GeneratedFiles, prompt: string, previewUrl = "/generated-preview/") => {
-    setFiles(nextFiles, prompt)
-    setDesignSession(null)
-    setMeta({
-      fileCount: Object.keys(nextFiles).length,
-      pageCount: Object.keys(nextFiles).filter((name) => name.startsWith("src/pages/")).length,
-      lastPrompt: prompt,
-      previewUrl
-    })
-  }
+  // Fetch projects dynamically from FastAPI backend
+  const fetchProjects = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/projects');
+      const data = await response.json();
+      setProjects(data.projects || []);
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+    try {
+      setIsCreating(true);
+      const response = await fetch(`/api/projects?name=${encodeURIComponent(newProjectName)}`, {
+        method: 'POST',
+      });
+      if (response.ok) {
+        setNewProjectName('');
+        fetchProjects(); // Refresh the list dynamically
+      }
+    } catch (error) {
+      console.error('Error creating project:', error);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  // Find currently selected project details
+  const currentProject = projects.find(p => p.id === selectedProjectId);
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-[#07080b] text-[#f7f2e8]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_8%,rgba(211,255,114,0.13),transparent_28rem),radial-gradient(circle_at_82%_18%,rgba(97,157,255,0.14),transparent_30rem),linear-gradient(135deg,#07080b_0%,#101116_48%,#08090d_100%)]" />
+    <div className="flex min-h-screen bg-[#07060d] text-gray-100 font-sans selection:bg-purple-600 selection:text-white">
       
-      <div
-        className={`absolute inset-0 ${activeScreen === "design" ? "block" : "hidden"}`}
-        aria-hidden={activeScreen !== "design"}
-      >
-        <div className="grid h-full w-full grid-cols-[minmax(480px,0.95fr)_minmax(420px,1fr)] gap-3 p-3 max-xl:grid-cols-[minmax(430px,0.9fr)_minmax(380px,1fr)] max-lg:grid-cols-1 max-lg:grid-rows-[minmax(520px,58vh)_1fr] max-sm:grid-rows-[minmax(560px,62vh)_1fr] max-sm:gap-2 max-sm:p-2">
-          <ChatPanel
-            meta={meta}
-            designSession={designSession}
-            onWireframe={setDesignSession}
-          />
-          <PreviewPanel
-            meta={meta}
-            designSession={designSession}
-            onDesignSession={setDesignSession}
-            onGenerated={handleGenerated}
-            onOpenAssetStudio={() => setActiveScreen("asset-studio")}
-          />
-        </div>
-      </div>
+      {/* Modular Sidebar */}
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      <div
-        className={`absolute inset-0 ${activeScreen === "asset-studio" ? "block" : "hidden"}`}
-        aria-hidden={activeScreen !== "asset-studio"}
-      >
-        <AssetStudio
-          sessionId={designSession?.session_id}
-          prompt={designSession?.prompt}
-          onClose={() => setActiveScreen("design")}
-          onSession={setDesignSession}
-          onGenerated={handleGenerated}
-        />
-      </div>
-    </main>
-  )
+      {/* Main Panel Content */}
+      <main className="flex-1 p-8 overflow-y-auto">
+        
+        {/* 1. Dashboard Tab */}
+        {activeTab === 'dashboard' && (
+          <Dashboard 
+            projects={projects}
+            loading={loading}
+            newProjectName={newProjectName}
+            setNewProjectName={setNewProjectName}
+            isCreating={isCreating}
+            handleCreateProject={handleCreateProject}
+            onOpenProject={(id) => {
+              setSelectedProjectId(id);
+              setActiveTab('projects');
+            }}
+            fetchProjects={fetchProjects}
+          />
+        )}
+
+        {/* 2. Projects & Workspace Tab */}
+        {activeTab === 'projects' && (
+          <div className="max-w-6xl mx-auto space-y-8">
+            {!selectedProjectId ? (
+              // All Projects Directory View
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-100 font-rajdhani">All Projects</h2>
+                    <p className="text-sm text-gray-400 mt-1">Manage and view active workspaces</p>
+                  </div>
+                </div>
+
+                {loading ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="animate-spin text-purple-500" size={32} />
+                  </div>
+                ) : projects.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-purple-950/20 rounded-lg">
+                    <p className="text-sm text-gray-400">No active projects found.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {projects.map((project) => (
+                      <div 
+                        key={project.id}
+                        onClick={() => setSelectedProjectId(project.id)}
+                        className="bg-[#0e0c1f]/40 border border-purple-950/30 hover:border-purple-500/50 rounded-xl p-6 transition-all hover:translate-y-[-2px] cursor-pointer group"
+                      >
+                        <h3 className="font-bold text-lg text-gray-200 group-hover:text-purple-400 transition-colors">{project.name}</h3>
+                        <p className="text-xs text-gray-500 mt-1">{project.pages} pages • {project.status}</p>
+                        <div className="mt-6 flex justify-between items-center text-xs border-t border-purple-950/25 pt-4">
+                          <span className="text-gray-600">Updated: {new Date(project.last_updated).toLocaleDateString()}</span>
+                          <span className="text-purple-400 font-semibold flex items-center gap-1">Open Workspace →</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Workspace detail
+              currentProject ? (
+                <WorkspaceOverview 
+                  project={currentProject} 
+                  onBack={() => setSelectedProjectId(null)} 
+                />
+              ) : (
+                <p className="text-red-400 text-sm">Project workspace not found.</p>
+              )
+            )}
+          </div>
+        )}
+
+        {/* 3. Chats Tab */}
+        {activeTab === 'chats' && (
+          <ChatPanel projects={projects} fetchProjects={fetchProjects} />
+        )}
+
+        {/* Temporary placeholders for remaining tabs */}
+        {activeTab !== 'dashboard' && activeTab !== 'projects' && activeTab !== 'chats' && (
+          <div className="max-w-4xl mx-auto py-12 text-center">
+            <h3 className="text-lg font-bold text-gray-200 uppercase tracking-wider mb-2">{activeTab} tab</h3>
+            <p className="text-sm text-gray-400">This layout component will be implemented dynamically in the next step of the plan.</p>
+          </div>
+        )}
+
+      </main>
+
+    </div>
+  );
 }

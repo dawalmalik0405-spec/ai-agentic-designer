@@ -1,210 +1,337 @@
-import { useState } from "react"
-import type { DesignSession, GenerationMeta } from "../App"
+import { useState } from 'react';
+import { 
+  Send, 
+  Loader2, 
+  MessageSquare, 
+  Sparkles,
+  CheckCircle2,
+  Clock,
+  AlertTriangle
+} from 'lucide-react';
+
+interface Project {
+  id: string;
+  name: string;
+  pages: number;
+  status: string;
+  last_updated: string;
+}
+
+interface ChatPanelProps {
+  projects: Project[];
+  fetchProjects: () => void;
+}
 
 interface Message {
-  id: string
-  role: "user" | "system" | "error"
-  text: string
+  sender: 'user' | 'system' | 'agent';
+  agentName?: string;
+  text: string;
+  timestamp: Date;
 }
 
-interface Props {
-  meta: GenerationMeta
-  designSession: DesignSession | null
-  onWireframe: (session: DesignSession) => void
-}
+export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
+  const [selectedProjId, setSelectedProjId] = useState<string>('');
+  const [prompt, setPrompt] = useState<string>('');
+  const [style, setStyle] = useState<string>('skeuomorphism');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [generating, setGenerating] = useState<boolean>(false);
+  
+  // Pipeline steps tracking for visual progress
+  const [pipelineSteps, setPipelineSteps] = useState([
+    { id: 'architect', label: 'Architect Agent', status: 'idle' },
+    { id: 'research', label: 'Research Agent', status: 'idle' },
+    { id: 'design', label: 'Design System Agent', status: 'idle' },
+    { id: 'page', label: 'Page Design Agent', status: 'idle' },
+    { id: 'asset', label: 'Asset Studio Agent', status: 'idle' },
+    { id: 'motion', label: 'Motion Agent', status: 'idle' },
+  ]);
 
-const STYLE_OPTIONS = [
-  { value: "minimalism", label: "Minimalism" },
-  { value: "glassmorphism", label: "Glassmorphism" },
-  { value: "skeuomorphism", label: "Skeuomorphism" },
-  { value: "claymorphism", label: "Claymorphism" },
-  { value: "liquid_glass", label: "Liquid Glass" },
-  { value: "neo_brutalism", label: "Neo Brutalism" }
-]
+  const handleSendPrompt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProjId) {
+      alert("Please select a project first.");
+      return;
+    }
+    if (!prompt.trim()) return;
 
-function createMessage(role: Message["role"], text: string): Message {
-  return {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    role,
-    text
-  }
-}
-
-function formatBackendError(data: unknown): string {
-  if (!data || typeof data !== "object") {
-    return "Generation failed"
-  }
-
-  const detail = "detail" in data ? (data as { detail?: unknown }).detail : undefined
-
-  if (typeof detail === "string") {
-    return detail
-  }
-
-  if (Array.isArray(detail)) {
-    return detail
-      .map((item) => {
-        if (!item || typeof item !== "object") return String(item)
-        const issue = item as { loc?: unknown[]; msg?: string; type?: string }
-        const field = Array.isArray(issue.loc) ? issue.loc.join(".") : "request"
-        return `${field}: ${issue.msg || issue.type || "Invalid value"}`
-      })
-      .join("\n")
-  }
-
-  return JSON.stringify(data, null, 2)
-}
-
-export default function ChatPanel({ meta, designSession, onWireframe }: Props) {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState("")
-  const [selectedStyle, setSelectedStyle] = useState("")
-  const [loading, setLoading] = useState(false)
-
-  const pageCount = designSession?.wireframe.pages.length ?? meta.pageCount
-
-  const handleWireframe = async () => {
-    const prompt = input.trim()
-    if (!prompt || loading) return
-
-    setLoading(true)
-    setMessages((prev) => [
-      ...prev,
-      createMessage("user", prompt),
-      createMessage("system", "Creating a wireframe draft. Assets and code will wait for your approval.")
-    ])
+    // Reset steps state
+    setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'idle' })));
+    
+    // Add user message to chat list
+    const userMsg: Message = { sender: 'user', text: prompt, timestamp: new Date() };
+    const systemMsg: Message = { 
+      sender: 'system', 
+      text: `Initializing agent team for project. Selected style: ${style}.`, 
+      timestamp: new Date() 
+    };
+    setMessages(prev => [...prev, userMsg, systemMsg]);
+    setGenerating(true);
+    const userPromptText = prompt;
+    setPrompt('');
 
     try {
-      const response = await fetch("/design-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, selected_style: selectedStyle })
-      })
+      // 1. Send the initial POST request to verify/set status
+      await fetch(`/api/projects/${selectedProjId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: userPromptText, selected_style: style })
+      });
 
-      if (!response.ok) {
-        throw new Error(formatBackendError(await response.json()))
-      }
+      // 2. Open EventSource stream for real-time progress events
+      const eventSource = new EventSource(
+        `/api/projects/${selectedProjId}/generate/stream?prompt=${encodeURIComponent(userPromptText)}&style=${encodeURIComponent(style)}`
+      );
 
-      const session = await response.json() as DesignSession
-      onWireframe(session)
-      setMessages((prev) => [
-        ...prev,
-        createMessage("system", "Wireframe ready. Review it in the preview panel, then approve it to see asset options.")
-      ])
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      setMessages((prev) => [...prev, createMessage("error", message)])
-    } finally {
-      setLoading(false)
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.node === 'complete') {
+          eventSource.close();
+          setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
+          setMessages(prev => [...prev, { 
+            sender: 'agent', 
+            agentName: 'System Orchestrator', 
+            text: 'Website generation completed successfully! Pages and motion specifications have been compiled.', 
+            timestamp: new Date() 
+          }]);
+          setGenerating(false);
+          fetchProjects();
+        } else if (data.node === 'cancelled' || data.node === 'failed') {
+          eventSource.close();
+          setPipelineSteps(prev => prev.map(s => s.status === 'running' || s.status === 'idle' ? { ...s, status: 'failed' } : s));
+          setMessages(prev => [...prev, { 
+            sender: 'system', 
+            text: data.error ? `Pipeline failed: ${data.error}` : 'Generation cancelled by user.', 
+            timestamp: new Date() 
+          }]);
+          setGenerating(false);
+          fetchProjects();
+        } else {
+          // Event matches an agent node name (architect, research, design, page, asset, motion)
+          const activeNodeId = data.node;
+          
+          setPipelineSteps(prev => {
+            // Find current matching index
+            const activeIdx = prev.findIndex(s => s.id === activeNodeId);
+            if (activeIdx === -1) return prev;
+
+            return prev.map((step, idx) => {
+              if (idx < activeIdx) return { ...step, status: 'done' }; // previous is complete
+              if (idx === activeIdx) return { ...step, status: 'running' }; // active
+              return { ...step, status: 'idle' }; // upcoming
+            });
+          });
+
+          // Print message log updates for agents
+          const stepLabel = pipelineSteps.find(s => s.id === activeNodeId)?.label || activeNodeId;
+          setMessages(prev => [...prev, {
+            sender: 'agent',
+            agentName: stepLabel,
+            text: `Agent node [${activeNodeId}] has started processing...`,
+            timestamp: new Date()
+          }]);
+        }
+      };
+
+      eventSource.onerror = (err) => {
+        console.error("EventSource failed:", err);
+        eventSource.close();
+        setPipelineSteps(prev => prev.map(s => s.status === 'running' || s.status === 'idle' ? { ...s, status: 'failed' } : s));
+        setGenerating(false);
+      };
+
+    } catch (err: any) {
+      console.error(err);
+      setPipelineSteps(prev => prev.map(s => s.status === 'running' || s.status === 'idle' ? { ...s, status: 'failed' } : s));
+      setMessages(prev => [...prev, { 
+        sender: 'system', 
+        text: `Generation Failed: ${err.message || 'Unknown network error occurred.'}`, 
+        timestamp: new Date() 
+      }]);
+      setGenerating(false);
     }
-  }
+  };
+
+  const handleCancelGeneration = async () => {
+    if (!selectedProjId) return;
+    try {
+      const response = await fetch(`/api/projects/${selectedProjId}/cancel`, {
+        method: 'POST',
+      });
+      if (response.ok) {
+        setMessages(prev => [...prev, { 
+          sender: 'system', 
+          text: 'Generation pipeline was cancelled manually by the user.', 
+          timestamp: new Date() 
+        }]);
+        setPipelineSteps(prev => prev.map(s => s.status === 'running' || s.status === 'idle' ? { ...s, status: 'failed' } : s));
+      }
+    } catch (error) {
+      console.error('Error canceling generation:', error);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
-    <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#171716]/94 shadow-2xl shadow-black/40 backdrop-blur-xl">
-      <div className="border-b border-white/10 px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#d3ff72]">Agentic UI</div>
-            <h1 className="mt-2 truncate text-xl font-semibold tracking-tight text-[#fffaf0]">Website Generator</h1>
-            <p className="mt-1 text-sm text-[#9ba3af]">Previewing generated website builds</p>
-          </div>
-          <div className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${
-            loading
-              ? "border-[#d3ff72]/40 bg-[#d3ff72]/10 text-[#edffbd]"
-              : "border-white/10 bg-white/5 text-[#aeb6c2]"
-          }`}>
-            {loading ? "Running" : "Ready"}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 border-b border-white/10 bg-black/14 text-sm">
-        <div className="px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.14em] text-[#737b87]">Files</div>
-          <div className="mt-1 text-lg font-semibold text-[#fffaf0]">{meta.fileCount}</div>
-        </div>
-        <div className="border-x border-white/10 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.14em] text-[#737b87]">Pages</div>
-          <div className="mt-1 text-lg font-semibold text-[#fffaf0]">{pageCount}</div>
-        </div>
-        <div className="px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.14em] text-[#737b87]">Status</div>
-          <div className="mt-1 text-lg font-semibold text-[#fffaf0]">{loading ? "Live" : "Idle"}</div>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-          {messages.length === 0 && (
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-xl shadow-black/20">
-              <div className="text-sm uppercase tracking-[0.18em] text-[#7f8792]">Chat</div>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-[#fffaf0]">What should we build?</h2>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[#a9b0bb]">
-                Create a wireframe first, review it, then approve the design before any assets or final code are generated.
-              </p>
+    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-80px)]">
+      
+      {/* Left Columns: Chat window */}
+      <div className="lg:col-span-2 bg-[#0b0a16] border border-purple-950/20 rounded-xl flex flex-col justify-between overflow-hidden shadow-xl">
+        {/* Header */}
+        <div className="p-4 border-b border-purple-950/25 bg-[#0d0c20]/60 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-950/30 border border-purple-900/30 rounded-lg text-purple-400">
+              <MessageSquare size={16} />
             </div>
-          )}
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={[
-                "max-w-[78%] rounded-2xl border px-4 py-3 text-sm leading-6 shadow-sm max-sm:max-w-[92%]",
-                message.role === "user"
-                  ? "ml-auto border-white/12 bg-[#2a2a28] text-[#f7f2e8]"
-                  : "",
-                message.role === "system"
-                  ? "mr-auto border-[#2d5cff]/35 bg-[#222426] text-[#d8dce0]"
-                  : "",
-                message.role === "error"
-                  ? "mr-auto border-[#ff6b6b]/40 bg-[#ff6b6b]/10 text-[#ffd0d0]"
-                  : ""
-              ].join(" ")}
-            >
-              {message.text}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-200">Agent Workspace Chat</h3>
+              <p className="text-[10px] text-gray-500">Collaborate with the AI Agents pipeline</p>
             </div>
-          ))}
+          </div>
+          
+          {/* Select project */}
+          <select 
+            value={selectedProjId}
+            onChange={(e) => setSelectedProjId(e.target.value)}
+            className="bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-600 transition-all cursor-pointer"
+          >
+            <option value="">Select a Project...</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
+            ))}
+          </select>
         </div>
-      </div>
 
-      <div className="border-t border-white/10 bg-[#171716]/95 px-5 py-4">
-        <div className="mx-auto w-full max-w-3xl rounded-3xl border border-white/10 bg-[#252523] p-4 shadow-2xl shadow-black/30">
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            disabled={loading}
-            rows={3}
-            className="h-24 w-full resize-none border-0 bg-transparent px-1 py-1 text-base leading-7 text-[#f8f4ea] outline-none placeholder:text-[#8d929b] disabled:opacity-60"
-            placeholder="Queue follow-up..."
-          />
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <select
-                value={selectedStyle}
-                onChange={(event) => setSelectedStyle(event.target.value)}
-                disabled={loading}
-                className="h-9 max-w-[180px] rounded-full border border-white/12 bg-[#1a1b1f] px-3 text-sm font-medium text-[#f8f4ea] outline-none transition focus:border-[#d3ff72]/70 disabled:opacity-60"
+        {/* Message Log */}
+        <div className="flex-1 p-6 overflow-y-auto space-y-4">
+          {messages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 max-w-sm mx-auto space-y-3">
+              <Sparkles className="text-purple-500 animate-pulse" size={32} />
+              <p className="text-sm font-semibold text-gray-300">Start Generating Website Assets</p>
+              <p className="text-xs text-gray-500">Select a project, specify your design prompt, and click generate to invoke the agents.</p>
+            </div>
+          ) : (
+            messages.map((msg, idx) => (
+              <div 
+                key={idx} 
+                className={`flex flex-col ${
+                  msg.sender === 'user' ? 'items-end' : 'items-start'
+                }`}
               >
-                <option value="" disabled>
-                  Select style
-                </option>
-                {STYLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div className={`max-w-md rounded-xl p-4 text-xs ${
+                  msg.sender === 'user' 
+                    ? 'bg-purple-600 text-white rounded-br-none shadow-md shadow-purple-950/15'
+                    : msg.sender === 'system'
+                    ? 'bg-purple-950/20 border border-purple-900/40 text-purple-300'
+                    : 'bg-[#121024] border border-purple-950/30 text-gray-200 rounded-bl-none'
+                }`}>
+                  {msg.agentName && (
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-purple-400 mb-1">
+                      {msg.agentName}
+                    </span>
+                  )}
+                  <p className="leading-relaxed">{msg.text}</p>
+                </div>
+                <span className="text-[8px] text-gray-600 mt-1">
+                  {msg.timestamp.toLocaleTimeString()}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Action input form */}
+        <form onSubmit={handleSendPrompt} className="p-4 border-t border-purple-950/20 bg-[#0d0c20]/40 flex gap-2">
+          {/* Select Style */}
+          <select 
+            value={style}
+            onChange={(e) => setStyle(e.target.value)}
+            className="bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-2 text-xs text-gray-300 focus:outline-none focus:border-purple-600 cursor-pointer"
+          >
+            <option value="minimalism">Minimalism</option>
+            <option value="glassmorphism">Glassmorphism</option>
+            <option value="skeuomorphism">Skeuomorphism</option>
+            <option value="neo_brutalism">Neo Brutalism</option>
+            <option value="liquid_glass">Liquid Glass</option>
+          </select>
+          
+          <input
+            type="text"
+            placeholder={selectedProjId ? "Describe the website you want to generate..." : "Select a project above to start..."}
+            disabled={!selectedProjId || generating}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            className="flex-1 bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-4 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition-all disabled:opacity-50"
+          />
+          {generating ? (
             <button
               type="button"
-              onClick={handleWireframe}
-              disabled={loading || !input.trim() || !selectedStyle}
-              className="h-10 rounded-full bg-[#d3ff72] px-5 text-sm font-semibold text-[#11140d] shadow-lg shadow-[#d3ff72]/10 transition hover:bg-[#e0ff94] hover:shadow-[#d3ff72]/20 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleCancelGeneration}
+              className="bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/30 rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
             >
-              {loading ? "Working..." : "Create wireframe"}
+              <Loader2 size={14} className="animate-spin" />
+              Stop
             </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!selectedProjId || !prompt.trim()}
+              className="bg-purple-600 hover:bg-purple-700 text-white rounded-lg px-4 py-2 text-xs font-semibold transition-all shadow-md shadow-purple-900/10 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+            >
+              <Send size={14} />
+              Generate
+            </button>
+          )}
+        </form>
+      </div>
+
+      {/* Right Column: Pipeline Checklist */}
+      <div className="bg-[#0b0a16] border border-purple-950/20 rounded-xl p-5 shadow-xl flex flex-col justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-300 mb-4">Pipeline Execution State</h4>
+          <div className="space-y-3">
+            {pipelineSteps.map((step) => {
+              const isRunning = step.status === 'running';
+              const isDone = step.status === 'done';
+              const isFailed = step.status === 'failed';
+              return (
+                <div 
+                  key={step.id} 
+                  className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
+                    isRunning 
+                      ? 'bg-purple-950/15 border-purple-600/50 text-purple-300' 
+                      : isDone 
+                      ? 'bg-emerald-950/10 border-emerald-900/30 text-emerald-400'
+                      : isFailed
+                      ? 'bg-red-950/10 border-red-900/30 text-red-400'
+                      : 'bg-[#0d0c20]/40 border-purple-950/15 text-gray-500'
+                  }`}
+                >
+                  <span className="text-xs font-semibold">{step.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    {isRunning && <Loader2 size={12} className="animate-spin text-purple-400" />}
+                    {isDone && <CheckCircle2 size={12} className="text-emerald-400" />}
+                    {isFailed && <AlertTriangle size={12} className="text-red-400" />}
+                    {!isRunning && !isDone && !isFailed && <Clock size={12} className="text-gray-600" />}
+                    <span className="text-[9px] uppercase tracking-wider font-semibold">
+                      {step.status}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
+        
+        {/* Helper guide footer */}
+        <div className="mt-6 border-t border-purple-950/15 pt-4">
+          <p className="text-[10px] text-gray-500 leading-relaxed">
+            The pipeline executes sequentially. Architect creates blueprints, Research analyzes references, Design establishes tokens, and Page builds section layouts.
+          </p>
+        </div>
       </div>
-    </aside>
-  )
+
+    </div>
+  );
 }

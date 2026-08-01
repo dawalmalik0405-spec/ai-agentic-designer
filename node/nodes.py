@@ -6,6 +6,7 @@ from agents.designing_agent import DesigningAgent
 from agents.page_agent import PageAgent
 from agents.asset_agent import AssetAgent
 from agents.gen_agent import GenerationAgent
+from agents.motion_agent import MotionAgent
 
 from schema.code import CodeGenerationInput
 
@@ -128,7 +129,26 @@ async def generation_node(
 
 
 
+async def motion_node(
+    state: WebsiteBuilderState
+):
 
+    print("motion started")
+
+    agent = MotionAgent()
+
+    result = await agent.generate_motion(
+        architecture=state["architect_output"],
+        design_system=state["design_system_output"],
+        page_design=state["page_design_output"],
+        asset_registry=state["asset_output"]
+    )
+
+    print("motion finished")
+
+    return {
+        "motion_output": result
+    }
 
 
 

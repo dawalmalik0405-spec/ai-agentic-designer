@@ -35,6 +35,15 @@ class AssetExecutor:
 
         self.provider = PollinationsProvider()
         self.storage = AssetStorage()
+        
+        # Internet providers
+        from .providers.search_provider import SearchProvider
+        from .providers.asset_downloader import AssetDownloader
+        from .providers.candidate_selector import CandidateSelector
+        
+        self.search_provider = SearchProvider()
+        self.asset_downloader = AssetDownloader(storage=self.storage)
+        self.candidate_selector = CandidateSelector()
 
 
     async def connect(self):
@@ -143,6 +152,52 @@ class AssetExecutor:
         )
     
 
+    async def generate_internet_asset(
+        self,
+        asset: AssetRequirement
+    ) -> GeneratedAsset:
+        if not asset.prompt:
+            raise ValueError(f"Asset {asset.asset_id} has no prompt for search")
+            
+        orientation = "landscape"
+        if asset.height > asset.width * 1.2:
+            orientation = "portrait"
+        elif abs(asset.width - asset.height) < asset.width * 0.2:
+            orientation = "squarish"
+            
+        keywords = [asset.prompt]
+        if asset.style_keywords:
+            keywords.extend(asset.style_keywords)
+            
+        # Import the search query schema
+        from .providers.search_provider import SearchQuery
+        query = SearchQuery(
+            keywords=keywords,
+            width_min=int(asset.width * 0.8),
+            height_min=int(asset.height * 0.8),
+            orientation=orientation,
+            max_results=10
+        )
+        
+        candidates = await self.search_provider.search(query, provider="unsplash")
+        
+        if not candidates:
+            raise RuntimeError(f"No internet candidates found for {asset.asset_id}")
+            
+        best = self.candidate_selector.select_best(asset, candidates)
+        if not best:
+             raise RuntimeError(f"No suitable candidate found for {asset.asset_id} from {len(candidates)} results")
+             
+        return await self.asset_downloader.download(
+            asset_id=asset.asset_id,
+            candidate=best,
+            output_filename=asset.output_filename,
+            asset_type=asset.asset_type,
+            width=asset.width,
+            height=asset.height
+        )
+    
+
     async def execute_asset(
         self,
         asset: AssetRequirement
@@ -150,13 +205,20 @@ class AssetExecutor:
 
         if (
             not asset.generation_required
-            or asset.source_strategy != SourceStrategy.GENERATE
+            or asset.source_strategy not in {SourceStrategy.GENERATE, SourceStrategy.INTERNET}
         ):
             return [
                 self.skipped_asset(
                     asset
                 )
             ]
+        
+        if asset.source_strategy == SourceStrategy.INTERNET:
+            try:
+                result = await self.generate_internet_asset(asset)
+            except Exception as error:
+                result = self.failed_asset(asset, error)
+            return [result]
         
         if asset.asset_type in {
             AssetType.IMAGE,

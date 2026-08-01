@@ -69,9 +69,6 @@ order, section_name, section_goal, layout, visual_style, components, animations,
 Every component must contain:
 component, variant, purpose, style.
 
-Arrays must be arrays.
-Strings must be strings.
-Numbers must be numbers.
 Design only the single page blueprint provided by the user message.
 Preserve the page identity from the Page Blueprint.
 Do not rename the page to Homepage unless the blueprint page name is Homepage.

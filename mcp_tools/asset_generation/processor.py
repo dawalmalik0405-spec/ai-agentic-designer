@@ -332,9 +332,8 @@ class AssetProcessor:
                 # Map library name to CSSLibrary enum
                 library_map = {
                     "bootstrap_icons": CSSLibrary.BOOTSTRAP_ICONS,
-                    "heroicons": CSSLibrary.HEROICONS,
                     "font_awesome": CSSLibrary.FONT_AWESOME,
-                    "ionicons": CSSLibrary.IONICONS,
+                    
                 }
                 
                 selected_library = library_map.get(library_name, CSSLibrary.HEROICONS)
