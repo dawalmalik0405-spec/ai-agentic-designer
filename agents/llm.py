@@ -16,7 +16,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-PLANNING_MODEL = os.getenv("PLANNING_MODEL", "mistralai/mistral-small-4-119b-2603")
+PLANNING_MODEL = os.getenv("PLANNING_MODEL", "mistralai/mistral-nemotron")
 REASONING_MODEL = os.getenv("REASON_MODEL", "minimaxai/minimax-m2.7")
 RESEARCH_MODEL = os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile")
 CODE_MODEL = os.getenv("CODE_MODEL", "deepseek-ai/deepseek-v4-pro")
