@@ -3,7 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from schema.architect import ArchitectOutput
 
 from agents.llm import deepseek_llm
-from pipeline_utils import resilient_ainvoke
+from pipeline_utils import resilient_ainvoke, parse_model_json
 import asyncio
 import json
 from pydantic import ValidationError
@@ -124,6 +124,21 @@ The architecture must help downstream agents:
 Think strategically.
 
 Stay at the architecture level.
+
+
+Consistency Rules
+
+The motion plan must respect the Design System.
+
+The motion plan must respect the Page Specification.
+
+The motion plan must use only assets available in the Asset Registry.
+
+Do not create motion for assets or components that do not exist.
+
+Do not modify layouts or component hierarchy.
+
+Motion is an enhancement layer only.
 
 """
 
@@ -331,9 +346,7 @@ Return a detailed ArchitectOutput.
         print(response.content)
 
         try:
-            result = ArchitectOutput.model_validate_json(
-                response.content
-            )
+            result = parse_model_json(ArchitectOutput, response.content)
         
         except ValidationError as e:
             print(e)
