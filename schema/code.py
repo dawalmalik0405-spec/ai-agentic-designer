@@ -37,5 +37,6 @@ class GeneratedFile(BaseModel):
 
 
 class CodeGenerationOutput(BaseModel):
-
     files: list[GeneratedFile]
+    build_status: str | None = None
+    preview_url: str | None = None

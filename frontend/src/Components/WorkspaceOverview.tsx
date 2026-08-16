@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import PreviewPanel from './PreviewPanel';
 
@@ -10,13 +10,56 @@ interface Project {
   last_updated: string;
 }
 
-interface WorkspaceOverviewProps {
-  project: Project;
-  onBack: () => void;
+interface ProjectPage {
+  page_name: string;
+  route: string;
+  file_path: string;
+  module_name: string;
+  is_home: boolean;
 }
 
-export default function WorkspaceOverview({ project, onBack }: WorkspaceOverviewProps) {
+interface WorkspaceOverviewProps {
+    project: Project;
+    onBack: () => void;
+    onOpenAssets: (page?: ProjectPage | null) => void;
+    onAddPage: () => void;
+    openPreviewSignal?: number;
+}
+
+export default function WorkspaceOverview({ project, onBack, onOpenAssets, onAddPage, openPreviewSignal = 0 }: WorkspaceOverviewProps) {
   const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [pages, setPages] = useState<ProjectPage[]>([]);
+  const [selectedPage, setSelectedPage] = useState<ProjectPage | null>(null);
+
+  const fetchPages = async () => {
+    try {
+      const response = await fetch(`/api/projects/${project.id}/pages`);
+      const data = await response.json();
+      const nextPages = data.pages || [];
+      setPages(nextPages);
+      setSelectedPage(prev => {
+        if (prev) {
+          const stillExists = nextPages.find((page: ProjectPage) => page.page_name === prev.page_name);
+          if (stillExists) return stillExists;
+        }
+        return nextPages[0] || null;
+      });
+    } catch (error) {
+      console.error('Failed to load project pages:', error);
+      setPages([]);
+      setSelectedPage(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchPages();
+  }, [project.id, project.pages, project.last_updated]);
+
+  useEffect(() => {
+    if (openPreviewSignal > 0) {
+      setShowPreview(true);
+    }
+  }, [openPreviewSignal]);
 
   if (showPreview) {
     return (
@@ -27,7 +70,7 @@ export default function WorkspaceOverview({ project, onBack }: WorkspaceOverview
             onClick={() => setShowPreview(false)}
             className="text-xs px-3 py-1.5 bg-[#0e0b1d] hover:bg-[#15112c] rounded-lg border border-purple-950/30 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
           >
-            ← Back to Workspace
+            &lt;- Back to Workspace
           </button>
           <div>
             <h2 className="text-lg font-bold text-gray-100 font-rajdhani">{project.name} Preview</h2>
@@ -36,7 +79,13 @@ export default function WorkspaceOverview({ project, onBack }: WorkspaceOverview
         </div>
 
         {/* Modular Preview Window */}
-        <PreviewPanel projectId={project.id} />
+        <PreviewPanel
+            projectId={project.id}
+            pageName={selectedPage?.page_name}
+            pageRoute={selectedPage?.route}
+            pageFilePath={selectedPage?.file_path}
+            onGenerateAssets={() => onOpenAssets(selectedPage)}
+        />
       </div>
     );
   }
@@ -50,11 +99,11 @@ export default function WorkspaceOverview({ project, onBack }: WorkspaceOverview
             onClick={onBack}
             className="text-xs px-3 py-1.5 bg-[#0e0b1d] hover:bg-[#15112c] rounded-lg border border-purple-950/30 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
           >
-            ← Back to List
+            &lt;- Back to List
           </button>
           <div>
             <h2 className="text-xl font-bold text-gray-100 font-rajdhani">{project.name} Workspace</h2>
-            <p className="text-xs text-gray-500">ID: {project.id} • Status: {project.status}</p>
+            <p className="text-xs text-gray-500">ID: {project.id} - Status: {project.status}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -124,26 +173,47 @@ export default function WorkspaceOverview({ project, onBack }: WorkspaceOverview
       <div className="bg-[#0b0a16] border border-purple-950/20 rounded-xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-200">Website Pages</h3>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e0c1f] hover:bg-[#15112c] border border-purple-950/30 rounded-lg text-xs font-semibold text-gray-300 transition-colors cursor-pointer">
+          <button
+            type="button"
+            onClick={onAddPage}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e0c1f] hover:bg-[#15112c] border border-purple-950/30 rounded-lg text-xs font-semibold text-gray-300 transition-colors cursor-pointer"
+          >
             <Plus size={14} /> Add Page
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-[#0e0c1f]/50 border border-purple-950/20 rounded-lg p-4 text-center cursor-pointer hover:border-purple-600/30 transition-all flex flex-col justify-between min-h-[120px] group">
-            <div>
-              <h5 className="font-bold text-sm text-gray-200 group-hover:text-purple-400 transition-colors">Homepage</h5>
-              <p className="text-[10px] text-gray-500 mt-1">/index</p>
+          {pages.map((page) => {
+            const isSelected = selectedPage?.page_name === page.page_name;
+            return (
+              <button
+                type="button"
+                key={`${page.page_name}-${page.route}`}
+                onClick={() => setSelectedPage(page)}
+                className={`bg-[#0e0c1f]/50 border rounded-lg p-4 text-center cursor-pointer hover:border-purple-600/40 transition-all flex flex-col justify-between min-h-[120px] group ${
+                  isSelected ? 'border-purple-500/70 shadow-lg shadow-purple-950/20' : 'border-purple-950/20'
+                }`}
+              >
+                <div>
+                  <h5 className="font-bold text-sm text-gray-200 group-hover:text-purple-400 transition-colors">{page.page_name}</h5>
+                  <p className="text-[10px] text-gray-500 mt-1">{page.route === '/' ? '/index' : page.route}</p>
+                </div>
+                <span className={`text-[10px] font-semibold self-center mt-4 ${isSelected ? 'text-emerald-400' : 'text-purple-400'}`}>
+                  {isSelected ? 'Active Page' : 'Select Page'}
+                </span>
+              </button>
+            );
+          })}
+
+          {pages.length === 0 && (
+            <div className="bg-[#0e0c1f]/20 border border-dashed border-purple-950/20 rounded-lg p-4 text-center flex flex-col justify-center items-center min-h-[120px]">
+              <p className="text-xs text-gray-500">No pages generated yet.</p>
+              <p className="text-[10px] text-gray-600 mt-1">Generate a project from the Chat Panel first.</p>
             </div>
-            <span className="text-[10px] text-purple-400 font-semibold self-center mt-4">Edit Layout</span>
-          </div>
-          
-          <div className="bg-[#0e0c1f]/20 border border-dashed border-purple-950/20 rounded-lg p-4 text-center flex flex-col justify-center items-center min-h-[120px]">
-            <p className="text-xs text-gray-500">No other pages added.</p>
-            <p className="text-[10px] text-gray-600 mt-1">Add About or Contact pages next.</p>
-          </div>
+          )}
         </div>
       </div>
+
     </div>
   );
 }

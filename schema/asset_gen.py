@@ -18,7 +18,7 @@ class GeneratedAsset(BaseModel):
     asset_type: AssetType
 
     file_path: str
-
+     
     provider: str
 
     status: GenerationStatus

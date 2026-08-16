@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Send, 
   Loader2, 
@@ -20,6 +20,9 @@ interface Project {
 interface ChatPanelProps {
   projects: Project[];
   fetchProjects: () => void;
+  initialProjectId?: string;
+  initialMode?: 'project' | 'add_page';
+  modeSignal?: number;
 }
 
 interface Message {
@@ -29,10 +32,18 @@ interface Message {
   timestamp: Date;
 }
 
-export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
+export default function ChatPanel({
+  projects,
+  fetchProjects,
+  initialProjectId = '',
+  initialMode = 'project',
+  modeSignal = 0,
+}: ChatPanelProps) {
   const [selectedProjId, setSelectedProjId] = useState<string>('');
   const [prompt, setPrompt] = useState<string>('');
+  const [pageName, setPageName] = useState<string>('');
   const [style, setStyle] = useState<string>('skeuomorphism');
+  const [mode, setMode] = useState<'project' | 'add_page'>('project');
   const [messages, setMessages] = useState<Message[]>([]);
   const [generating, setGenerating] = useState<boolean>(false);
   
@@ -41,10 +52,24 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
     { id: 'architect', label: 'Architect Agent', status: 'idle' },
     { id: 'research', label: 'Research Agent', status: 'idle' },
     { id: 'design', label: 'Design System Agent', status: 'idle' },
-    { id: 'page', label: 'Page Design Agent', status: 'idle' },
-    { id: 'asset', label: 'Asset Studio Agent', status: 'idle' },
-    { id: 'motion', label: 'Motion Agent', status: 'idle' },
+    { id: 'page', label: 'Page planner', status: 'idle' },
+    { id: "page_code", label: "Page Code Agent", status: "idle" },
   ]);
+
+  useEffect(() => {
+    if (initialProjectId) {
+      setSelectedProjId(initialProjectId);
+    }
+    setMode(initialMode);
+
+    if (initialMode === 'add_page') {
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: 'Add Page mode is active. Enter a page name and prompt, then generate the new page inside this project.',
+        timestamp: new Date(),
+      }]);
+    }
+  }, [initialProjectId, initialMode, modeSignal]);
 
   const handleSendPrompt = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +78,10 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
       return;
     }
     if (!prompt.trim()) return;
+    if (mode === 'add_page' && !pageName.trim()) {
+      alert("Please enter a page name.");
+      return;
+    }
 
     // Reset steps state
     setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'idle' })));
@@ -67,11 +96,42 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
     setMessages(prev => [...prev, userMsg, systemMsg]);
     setGenerating(true);
     const userPromptText = prompt;
+    const pageNameText = pageName;
     setPrompt('');
 
     try {
+      if (mode === 'add_page') {
+        setPipelineSteps(prev => prev.map((step, idx) => idx === 0 ? { ...step, status: 'running' } : { ...step, status: 'idle' }));
+        const response = await fetch(`/api/projects/${selectedProjId}/add-page`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            page_name: pageNameText,
+            prompt: userPromptText,
+            selected_style: style,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.detail || 'Failed to generate new page.');
+        }
+
+        setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
+        setMessages(prev => [...prev, {
+          sender: 'agent',
+          agentName: 'Add Page Orchestrator',
+          text: `New page "${pageNameText}" was generated and connected to the existing project.`,
+          timestamp: new Date()
+        }]);
+        setPageName('');
+        setGenerating(false);
+        fetchProjects();
+        return;
+      }
+
       // 1. Send the initial POST request to verify/set status
-      await fetch(`/api/projects/${selectedProjId}/generate`, {
+      await fetch(`/api/projects/${selectedProjId}/generate-page`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: userPromptText, selected_style: style })
@@ -79,7 +139,7 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
 
       // 2. Open EventSource stream for real-time progress events
       const eventSource = new EventSource(
-        `/api/projects/${selectedProjId}/generate/stream?prompt=${encodeURIComponent(userPromptText)}&style=${encodeURIComponent(style)}`
+        `/api/projects/${selectedProjId}/generate-page/stream?prompt=${encodeURIComponent(userPromptText)}&style=${encodeURIComponent(style)}`
       );
 
       eventSource.onmessage = (event) => {
@@ -185,22 +245,36 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
               <MessageSquare size={16} />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-200">Agent Workspace Chat</h3>
-              <p className="text-[10px] text-gray-500">Collaborate with the AI Agents pipeline</p>
+              <h3 className="text-sm font-semibold text-gray-200">
+                {mode === 'add_page' ? 'Add Page Chat' : 'Agent Workspace Chat'}
+              </h3>
+              <p className="text-[10px] text-gray-500">
+                {mode === 'add_page' ? 'Generate a new page inside the selected project' : 'Collaborate with the AI Agents pipeline'}
+              </p>
             </div>
           </div>
           
           {/* Select project */}
-          <select 
-            value={selectedProjId}
-            onChange={(e) => setSelectedProjId(e.target.value)}
-            className="bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-600 transition-all cursor-pointer"
-          >
-            <option value="">Select a Project...</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as 'project' | 'add_page')}
+              className="bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-600 transition-all cursor-pointer"
+            >
+              <option value="project">Generate Project</option>
+              <option value="add_page">Generate New Page</option>
+            </select>
+            <select 
+              value={selectedProjId}
+              onChange={(e) => setSelectedProjId(e.target.value)}
+              className="bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-600 transition-all cursor-pointer"
+            >
+              <option value="">Select a Project...</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Message Log */}
@@ -255,10 +329,27 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
             <option value="neo_brutalism">Neo Brutalism</option>
             <option value="liquid_glass">Liquid Glass</option>
           </select>
+
+          {mode === 'add_page' && (
+            <input
+              type="text"
+              placeholder="Page name"
+              disabled={!selectedProjId || generating}
+              value={pageName}
+              onChange={(e) => setPageName(e.target.value)}
+              className="w-36 bg-[#0f0e1d] border border-purple-950/40 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition-all disabled:opacity-50"
+            />
+          )}
           
           <input
             type="text"
-            placeholder={selectedProjId ? "Describe the website you want to generate..." : "Select a project above to start..."}
+            placeholder={
+              selectedProjId
+                ? mode === 'add_page'
+                  ? "Describe the new page to add..."
+                  : "Describe the website you want to generate..."
+                : "Select a project above to start..."
+            }
             disabled={!selectedProjId || generating}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -276,11 +367,11 @@ export default function ChatPanel({ projects, fetchProjects }: ChatPanelProps) {
           ) : (
             <button
               type="submit"
-              disabled={!selectedProjId || !prompt.trim()}
+              disabled={!selectedProjId || !prompt.trim() || (mode === 'add_page' && !pageName.trim())}
               className="bg-purple-600 hover:bg-purple-700 text-white rounded-lg px-4 py-2 text-xs font-semibold transition-all shadow-md shadow-purple-900/10 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
             >
               <Send size={14} />
-              Generate
+              {mode === 'add_page' ? 'Generate New Page' : 'Generate'}
             </button>
           )}
         </form>
