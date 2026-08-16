@@ -140,6 +140,41 @@ Do not modify layouts or component hierarchy.
 
 Motion is an enhancement layer only.
 
+
+
+========================
+OUTPUT REQUIREMENTS
+========================
+
+Return ONLY a single valid JSON object.
+
+The first character of your response MUST be:
+{
+
+The last character of your response MUST be:
+}
+
+Do NOT use:
+- ```json
+- ```
+- Markdown
+- XML
+- YAML
+- Comments
+- Explanations
+- Notes
+- Prefixes
+- Suffixes
+
+Do NOT wrap the JSON in double braces like:
+{{
+...
+}}
+
+The response must be directly parseable by Python's json.loads() without any preprocessing.
+
+If you cannot satisfy the schema, still return valid JSON matching the schema with your best values.
+
 """
 
 
