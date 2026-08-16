@@ -6,7 +6,7 @@ from langchain_core.messages import (
     SystemMessage,
     HumanMessage
 )
-from agents.llm import deepseek_llm
+from agents.llm import reason_llm
 from pipeline_utils import extract_json_object, parse_model_json, resilient_ainvoke
 import logging
 import os
@@ -128,7 +128,7 @@ Valid JSON example:
 class PageAgent:
 
   def __init__(self):
-    self.model = deepseek_llm()
+    self.model = reason_llm()
 
 
   async def _generate_single_page(

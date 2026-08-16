@@ -2,7 +2,7 @@ from mcp_tools.firecrawl.reasearch_tool import (
     scrap_design,
     search_design
 )
-from agents.llm import deepseek_llm
+from agents.llm import reason_llm
 from schema.architect import ArchitectOutput
 from schema.research import ResearchOutput
 from pipeline_utils import load_model_json, parse_model_json, resilient_ainvoke
@@ -54,9 +54,9 @@ class ResearchAgent:
 
     def __init__(self):
 
-        self.model = deepseek_llm()
+        self.model = reason_llm()
 
-        self.url_selector = deepseek_llm()
+        self.url_selector = reason_llm()
             
         
             

@@ -1,5 +1,5 @@
 from schema.code import CodeGenerationInput
-from agents.llm import gemini_flash_llm, mcp_code_llm
+from agents.llm import gemini_flash_llm
 from pipeline_utils import resilient_ainvoke
 from mcp_tools.initialize_mcps import run_mcp_agent
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -7,184 +7,207 @@ import os
 import re
 import json
 import logging
+import asyncio
+import subprocess
+import sys
+import threading
+import queue
+import socket
 from pathlib import Path
+import shutil
 
 logger = logging.getLogger(__name__)
 
 CURRENT_DIR = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
-OUTPUT_DIR = os.path.join(
-    PROJECT_ROOT,
-    "generated_site"
-)
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "generated_site")
 
-SYSTEM_PROMPT = """
-You are an expert frontend engineer.
+# Global to track the running Vite dev server process across generations
+DEV_SERVER_PROCESS = None
 
-Your task is to generate a React + TailwindCSS page based on a wireframe blueprint.
-You are generating code BEFORE visual assets have been created.
-Use placeholders like `https://placehold.co/600x400` for images, and standard SVG shapes for icons.
+# How long to wait for "npm run dev" to report it's ready before giving up.
+DEV_SERVER_READY_TIMEOUT = 30
+# Strings Vite prints once the dev server is actually serving requests.
+DEV_SERVER_READY_MARKERS = ("ready in", "Local:")
 
-Use:
-- User Prompt
-- Design System Output
-- Page Blueprint
-- Context7 MCP for current React, TypeScript, TailwindCSS, GSAP, and React Router usage when you need library guidance.
-- Filesystem MCP for all project file writes.
 
-Rules:
-- Create reusable React components.
-- Use TailwindCSS for styling.
-- Use GSAP for animations (ScrollTrigger, etc.).
-- Generate production-ready code.
-- Do not create generic filler pages. Implement the sections and components from the PAGE BLUEPRINT.
-- Write files only inside the output directory provided.
-- Write source files under src.
-- You must write a complete React component for the requested page.
-- For `write_file`, `path` must be a string and `content` must be one plain string containing the complete file text.
-- Never send `content` as a JSON object, array, map, or nested structure. Never repeat an invalid `write_file` call.
-- Do not use `read_text_file`: it is incompatible with this filesystem server. Use `read_multiple_files` to inspect existing source files.
-
-Return a concise summary of the files written.
-Return final answer immediately with a concise list of files written.
-Use the filesystem tool to create each file.
-"""
-
-STYLE_GUIDANCE = {
-    "glassmorphism":
-        "Use Apple/Vercel/Linear style aesthetics. Use glassmorphism "
-        "(`backdrop-blur-xl bg-white/5 border border-white/10`), glowing "
-        "radial gradients behind sections, tight typography leading, and "
-        "high-contrast text.",
-
-    "neo_brutalism":
-        "Use hard black borders (`border-2 border-black`), solid bold colors "
-        "(bright yellow, red, blue), hard shadows "
-        "(`shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]`), and uppercase headings. "
-        "No gradients, no blur.",
-
-    "minimalism":
-        "Use excessive whitespace, zero borders, very light gray or pure "
-        "white backgrounds, sparse typography, and extremely subtle hover "
-        "states. No gradients, no glassmorphism.",
-
-    "liquid_glass":
-        "Use visionOS-style liquid blur: layered translucent surfaces "
-        "(`backdrop-blur-2xl bg-white/10`), luminous soft-edged highlights, "
-        "rounded-full or very large radii, and subtle refractive gradient "
-        "borders. Motion should feel fluid and buoyant, not sharp.",
-
-    "claymorphism":
-        "Use soft, puffy surfaces with large border-radius (`rounded-3xl`), "
-        "dual soft shadows (one light, one dark) to fake extruded depth "
-        "(`shadow-[6px_6px_16px_rgba(0,0,0,0.15),-6px_-6px_16px_rgba(255,255,255,0.7)]`), "
-        "pastel or muted colors, and playful rounded typography.",
-
-    "skeuomorphism":
-        "Use realistic physical metaphors: subtle gradients simulating "
-        "material (brushed metal, paper, leather textures via layered "
-        "shadows), tactile-looking buttons with pressed/raised states, "
-        "drop shadows implying real light sources, and skeuomorphic icons.",
-}
-
-class PageCodeAgent:
-    def __init__(self):
-        self.model = gemini_flash_llm()
-        self.mcp_model = mcp_code_llm()
-
-    def _module_name(self, name: str) -> str:
-        words = re.findall(r"[A-Za-z0-9]+", name)
-        if not words:
-            return "Page"
-        return "".join(word[:1].upper() + word[1:] for word in words)
-
-    def _route_path(self, page_name: str, index: int) -> str:
-        if index == 0:
-            return "/"
-        words = re.findall(r"[A-Za-z0-9]+", page_name.lower())
-        return "/" + "-".join(words)
+class CodePromptBuilder:
+    """Builds strict prompts for the Code Agent enforcing single responsibility."""
 
     @staticmethod
-    def _response_text(response) -> str:
-        """Normalize ChatNVIDIA content before saving a generated TSX file."""
-        content = getattr(response, "content", response)
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                    parts.append(item["text"])
-            return "".join(parts)
-        return str(content)
+    def build_system_prompt() -> str:
+        return """You are the Code Generation Agent.
 
-    @classmethod
-    def _extract_tsx(cls, response) -> str:
-        text = cls._response_text(response).strip()
-        fenced = re.search(r"```(?:tsx|typescript|jsx|javascript)?\\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-        code = (fenced.group(1) if fenced else text).strip()
-        if "export default" not in code:
-            raise ValueError("The code model did not return a complete React page component.")
-        return code
+Your only responsibility is to convert the provided Design System and Page Blueprint into a production-ready React + TypeScript page component.
 
-    def _write_tailwind_config(self, design_output) -> str:
-        if not design_output:
-            return ""
-        
-        config = f"""
-/** @type {{import('tailwindcss').Config}} */
-export default {{
-  content: [
-    "./index.html",
-    "./src/**/*.{{js,ts,jsx,tsx}}",
-  ],
-  theme: {{
-    extend: {{
-      colors: {{
-        primary: '{design_output.colors.primary}',
-        secondary: '{design_output.colors.secondary}',
-        accent: '{design_output.colors.accent}',
-        background: '{design_output.colors.background}',
-        surface: '{design_output.colors.surface}',
-        success: '{design_output.colors.success}',
-        warning: '{design_output.colors.warning}',
-        error: '{design_output.colors.error}',
-      }},
-      fontFamily: {{
-        heading: ['{design_output.typography.heading_font}', 'sans-serif'],
-        body: ['{design_output.typography.body_font}', 'sans-serif'],
-      }},
-      spacing: {{
-        'xxs': '{design_output.spacing.xxs}',
-        'xs': '{design_output.spacing.xs}',
-        'sm': '{design_output.spacing.sm}',
-        'md': '{design_output.spacing.md}',
-        'lg': '{design_output.spacing.lg}',
-        'xl': '{design_output.spacing.xl}',
-        'xxl': '{design_output.spacing.xxl}',
-      }},
-      borderRadius: {{
-        'sm': '{design_output.radius.small}',
-        'md': '{design_output.radius.medium}',
-        'lg': '{design_output.radius.large}',
-        'pill': '{design_output.radius.pill}',
-      }},
-      boxShadow: {{
-        'sm': '{design_output.shadows.small}',
-        'md': '{design_output.shadows.medium}',
-        'lg': '{design_output.shadows.large}',
-      }},
-    }},
-  }},
-  plugins: [],
-}}
+You are NOT a designer, planner, or architect. All design decisions have already been made by previous agents. Your job is to implement them faithfully.
+
+==========================================================
+PRIMARY RESPONSIBILITIES
+==========================================================
+
+- Generate one complete React TSX page component.
+- Implement the supplied Page Blueprint exactly.
+- Follow the supplied Design System exactly.
+- Produce clean, readable, production-quality React code.
+- Export a single default React component.
+
+==========================================================
+STRICT BOUNDARIES
+==========================================================
+
+DO NOT redesign the page.
+
+DO NOT invent new sections.
+
+DO NOT remove sections.
+
+DO NOT add sections.
+
+DO NOT change layouts.
+
+DO NOT change typography.
+
+DO NOT change spacing.
+
+DO NOT change colors.
+
+DO NOT change content.
+
+DO NOT rewrite copy.
+
+DO NOT generate placeholder text.
+
+DO NOT generate placeholder images.
+
+DO NOT generate assets.
+
+DO NOT generate SVG illustrations.
+
+DO NOT generate animations.
+
+DO NOT use GSAP.
+
+DO NOT use Framer Motion.
+
+DO NOT implement parallax or scroll effects.
+
+DO NOT edit previously generated files.
+
+DO NOT generate package.json.
+
+DO NOT generate CSS files.
+
+DO NOT generate configuration files.
+
+Assume the project structure already exists.
+
+==========================================================
+HEROUI — MANDATORY TOOL USE
+==========================================================
+You have access to HeroUI MCP tools. You MUST use them, not your own memory of
+HeroUI, whenever a HeroUI component is needed. Concretely, before writing any
+JSX that references a HeroUI component:
+
+1. List every HeroUI component the blueprint requires.
+2. For each one, call the HeroUI MCP documentation tool exactly once to fetch
+   its real props, exports, and usage example.
+3. If the component needs a context Provider (e.g. a form, modal, or table
+   provider), fetch that provider's documentation too, before using it.
+4. Only use component names, props, and exports that the MCP tool actually
+   returned. Never assume an export or prop exists because it "sounds right"
+   or matches an older version you remember.
+5. Do not call the same component's documentation tool more than once.
+6. Once you have documentation for every HeroUI component the page needs,
+   stop calling tools and generate the page immediately.
+
+If a required HeroUI component cannot be found via the MCP tool, fall back to
+a plain Tailwind-styled native element instead of guessing at a HeroUI API.
+
+Rules:
+
+- Use HeroUI whenever an equivalent component exists.
+- Use Tailwind CSS only for layout, spacing, sizing and small visual adjustments.
+
+==========================================================
+CODE QUALITY
+==========================================================
+
+Generate idiomatic React 19.
+
+Use TypeScript.
+
+Use functional components.
+
+Prefer reusable JSX where appropriate inside the page.
+
+Avoid unnecessary state.
+
+Avoid unnecessary effects.
+
+Avoid unnecessary abstractions.
+
+Generate code that compiles without modification.
+
+==========================================================
+OUTPUT FORMAT
+==========================================================
+
+Return ONLY one complete React TSX page component.
+
+Return nothing except a single ```tsx``` code block.
+
+The component must:
+
+- export default
+- compile successfully
+- contain all imports
+- contain no explanations
+- contain no markdown outside the code block
+- contain no comments describing what you did
+
+Never generate additional files.
+Never describe your reasoning.
+Never explain your choices.
+
 """
-        filepath = os.path.join(OUTPUT_DIR, "tailwind.config.js")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(config.strip())
-        return filepath
+
+    @staticmethod
+    def build_user_prompt(page_blueprint, design_system, style_guidance: str, instruction: str = None) -> str:
+        prompt = f"""
+Generate one production-ready React TSX page component.
+
+Implement the following Page Blueprint exactly.
+
+Use the supplied Design System exactly.
+
+Do not redesign the page.
+
+Do not invent content.
+
+Do not add or remove sections.
+
+Do not generate assets.
+
+Do not generate animations.
+
+Style Guidance:
+{style_guidance}
+
+Design System:
+{design_system}
+
+Page Blueprint:
+{page_blueprint}
+"""
+        if instruction:
+            prompt += f"\n\nUSER EDIT INSTRUCTION:\n{instruction}\nModify the page specifically to address this instruction."
+
+        return prompt
+
+
+class ProjectShellGenerator:
+    """Generates the foundational React project files synchronously."""
 
     @staticmethod
     def _is_dark_hex_color(color: str) -> bool:
@@ -204,7 +227,75 @@ export default {{
         brightness = (r * 299 + g * 587 + b * 114) / 1000
         return brightness < 128
 
-    def _write_index_css(self, design_output=None) -> str:
+    @staticmethod
+    def _module_name(name: str) -> str:
+        words = re.findall(r"[A-Za-z0-9]+", name)
+        if not words:
+            return "Page"
+        return "".join(word[:1].upper() + word[1:] for word in words)
+
+    @staticmethod
+    def _route_path(page_name: str, index: int) -> str:
+        if index == 0:
+            return "/"
+        words = re.findall(r"[A-Za-z0-9]+", page_name.lower())
+        return "/" + "-".join(words)
+
+    def generate_shell(self, state: dict) -> str:
+        directories = [
+            "src/components",
+            "src/pages",
+            "src/hooks",
+            "src/lib",
+            "src/assets",
+            "public",
+        ]
+        for directory in directories:
+            os.makedirs(os.path.join(OUTPUT_DIR, directory), exist_ok=True)
+
+        pages = state["page_design_output"].pages
+        page_info = []
+        for index, page in enumerate(pages):
+            page_info.append({
+                "module": self._module_name(page.page_name),
+                "route": self._route_path(page.page_name, index),
+                "label": page.page_name,
+            })
+
+        design_output = state.get("design_system_output")
+
+        package = {
+            "name": "generated-website",
+            "private": True,
+            "version": "0.1.0",
+            "type": "module",
+            "scripts": {
+                "dev": "vite",
+                "build": "tsc -b && vite build",
+                "preview": "vite preview"
+            },
+            "dependencies": {
+                "@heroui/react": "^3.2.4",
+                "framer-motion": "^13.0.0",
+                "lucide-react": "^1.30.0",
+                "react": "^19.2.8",
+                "react-dom": "^19.2.8",
+                "react-router-dom": "^7.18.2"
+            },
+            "devDependencies": {
+                "@tailwindcss/postcss": "^4.3.3",
+                "@types/node": "^26.2.0",
+                "@types/react": "^19.2.18",
+                "@types/react-dom": "^19.2.4",
+                "@vitejs/plugin-react": "^5.2.0",
+                "autoprefixer": "^10.5.4",
+                "postcss": "^8.5.26",
+                "tailwindcss": "^4.3.3",
+                "typescript": "^5.9.2",
+                "vite": "^7.1.3"
+            }
+        }
+
         background = "#f8fafc"
         text = "#0f172a"
         if design_output:
@@ -212,63 +303,46 @@ export default {{
             text = getattr(design_output.colors, "surface", text)
             if self._is_dark_hex_color(background):
                 text = getattr(design_output.colors, "dark_surface", "#f7f2e8")
-        css = f"""@tailwind base;
-@tailwind components;
-@tailwind utilities;
- 
-:root {{ font-family: Inter, system-ui, sans-serif; color: {text}; background: {background}; }}
-* {{ box-sizing: border-box; }}
-html, body, #root {{ min-height: 100%; margin: 0; }}
-body {{ min-width: 320px; }}
+
+        index_css = f"""
+@import "tailwindcss";
+
+:root {{
+  font-family: Inter, system-ui, sans-serif;
+}}
+
+html,
+body,
+#root {{
+  width: 100%;
+  min-height: 100%;
+}}
+* {{
+    box-sizing: border-box;
+}}
+body {{
+  margin: 0;
+  background: {background};
+  color: {text};
+}}
 """
-        filepath = os.path.join(OUTPUT_DIR, "src", "index.css")
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(css)
-        return filepath
 
-    def _build_page_info(self, pages) -> list[dict[str, str]]:
-        page_info = []
-        for index, page in enumerate(pages):
-            page_info.append(
-                {
-                    "module": self._module_name(page.page_name),
-                    "route": self._route_path(index=index, page_name=page.page_name),
-                    "label": page.page_name,
-                }
-            )
-        return page_info
-
-    def _build_main_tsx(self, page_info: list[dict[str, str]]) -> str:
-        imports = "\n".join(
-            f'import {item["module"]} from "./pages/{item["module"]}";'
-            for item in page_info
-        )
-        routes = "\n".join(
-            f'        <Route path={json.dumps(item["route"])} element={{<{item["module"]} />}} />'
-            for item in page_info
-        )
+        imports = "\n".join(f'import {item["module"]} from "./pages/{item["module"]}";' for item in page_info)
+        routes = "\n".join(f'        <Route path={json.dumps(item["route"])} element={{<{item["module"]} />}} />' for item in page_info)
         nav_items = "\n".join(
-            (
-                "          <NavLink\n"
-                f'            key={json.dumps(item["route"])}\n'
-                f'            to={item["route"]}\n'
-                '            className={({ isActive }) => (isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : "rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}\n'
-                "          >\n"
-                f'            {json.dumps(item["label"])}\n'
-                "          </NavLink>"
-            )
+            f'          <NavLink to={json.dumps(item["route"])} className={{({{ isActive }}) => (isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : "rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}}> {json.dumps(item["label"])} </NavLink>'
             for item in page_info
         )
-
-        return f'''import {{ StrictMode }} from "react";
+        main_tsx = f'''import {{ StrictMode }} from "react";
 import {{ createRoot }} from "react-dom/client";
+import Providers from "./providers";
+
 import {{ BrowserRouter, NavLink, Route, Routes, Navigate }} from "react-router-dom";
 import "./index.css";
 {imports}
 
 const App = () => (
-  <div className="min-h-screen bg-slate-50 text-slate-900">
+  <div className="min-h-screen">
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur">
       <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3">
 {nav_items}
@@ -286,122 +360,49 @@ const App = () => (
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+        <Providers>
+            <App />
+        </Providers>
     </BrowserRouter>
   </StrictMode>,
 );
 '''
 
-    def _create_project_shell(self, state: dict) -> str:
-        """Create stable shared files without spending an MCP tool-call turn."""
-        directories = [
-            "src/components",
-            "src/pages",
-            "src/hooks",
-            "src/lib",
-            "src/assets",
-            "public",
-        ]
-        for directory in directories:
-            os.makedirs(os.path.join(OUTPUT_DIR, directory), exist_ok=True)
-
-        pages = state["page_design_output"].pages
-        page_info = self._build_page_info(pages)
-
-        package = {
-            "name": "generated-website",
-            "private": True,
-            "version": "0.1.0",
-            "type": "module",
-            "scripts": {"dev": "vite", "build": "tsc -b", "preview": "vite preview"},
-            "dependencies": {
-                "@gsap/react": "^2.1.1",
-                "framer-motion": "^11.11.17",
-                "gsap": "^3.12.5",
-                "lenis": "^1.1.18",
-                "react": "^18.3.1",
-                "react-dom": "^18.3.1",
-                "react-router-dom": "^7.1.1",
-            },
-            "devDependencies": {
-                "@types/node": "^22.10.2",
-                "@types/react": "^18.3.12",
-                "@types/react-dom": "^18.3.1",
-                "@vitejs/plugin-react": "^4.3.4",
-                "autoprefixer": "^10.4.20",
-                "postcss": "^8.4.49",
-                "tailwindcss": "^3.4.17",
-                "typescript": "^5.7.2",
-                "vite": "^6.0.5",
-            },
-        }
-
         files = {
             "package.json": json.dumps(package, indent=2) + "\n",
-            "index.html": """<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Generated Website</title>
-  </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
-</html>
-""",
+            "index.html": '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Generated Website</title>\n  </head>\n  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>\n</html>\n',
             "tsconfig.json": '{"files": [], "references": [{"path":"./tsconfig.app.json"},{"path":"./tsconfig.node.json"}]}\n',
-            "tsconfig.app.json": """{
-  "compilerOptions": {"target":"ES2020","useDefineForClassFields":true,"lib":["ES2020","DOM","DOM.Iterable"],"skipLibCheck":true,"esModuleInterop":true,"allowSyntheticDefaultImports":true,"strict":true,"module":"ESNext","moduleResolution":"Bundler","resolveJsonModule":true,"isolatedModules":true,"noEmit":true,"jsx":"react-jsx"},
-  "include": ["src"]
-}
-""",
-            "tsconfig.node.json": """{
-  "compilerOptions": {"composite":true,"skipLibCheck":true,"module":"ESNext","moduleResolution":"Bundler","types":["node"]},
-  "include": ["vite.config.ts"]
-}
-""",
-            "vite.config.ts": """import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "node:path";
-export default defineConfig({ plugins:[react()], resolve:{ alias:{"@":path.resolve(__dirname,"src")} } });
-""",
-            "src/main.tsx": self._build_main_tsx(page_info),
-            "src/index.css": """@tailwind base;
-@tailwind components;
-@tailwind utilities;
-:root { font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
-* { box-sizing: border-box; }
-html, body, #root { min-height: 100%; margin: 0; }
-""",
-            "src/components/Button.tsx": """import type { ButtonHTMLAttributes } from "react";
+            "tsconfig.app.json": '{\n  "compilerOptions": {"target":"ES2022","useDefineForClassFields":true,"lib":["ES2022","DOM","DOM.Iterable"],"skipLibCheck":true,"esModuleInterop":true,"allowSyntheticDefaultImports":true,"strict":true,"module":"ESNext","moduleResolution":"Bundler","resolveJsonModule":true,"isolatedModules":true,"noEmit":true,"jsx":"react-jsx"},\n  "include": ["src"]\n}\n',
+            "tsconfig.node.json": '{\n  "compilerOptions": {"composite":true,"skipLibCheck":true,"module":"ESNext","moduleResolution":"Bundler","types":["node"]},\n  "include": ["vite.config.ts"]\n}\n',
+            "vite.config.ts": 'import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\nimport { fileURLToPath } from "node:url";\nimport path from "node:path";\nconst __dirname = path.dirname(fileURLToPath(import.meta.url));\nexport default defineConfig({ base: "/site-preview/", plugins:[react()], resolve:{ alias:{"@":path.resolve(__dirname,"src")} } });\n',
+            "src/providers.tsx": """import type { ReactNode } from "react";
+import { RouterProvider } from "@heroui/react";
+import { useNavigate } from "react-router-dom";
 
-export function Button({ className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export default function Providers({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const navigate = useNavigate();
+
   return (
-    <button
-      className={`rounded-full px-5 py-3 font-medium transition hover:opacity-80 ${className}`}
-      {...props}
-    />
+    <RouterProvider navigate={navigate}>
+      {children}
+    </RouterProvider>
   );
 }
-
-export default Button;
 """,
-            "src/components/Card.tsx": """import type { HTMLAttributes } from "react";
-
-export function Card({ className = "", ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={`rounded-xl border border-white/10 bg-white/5 p-6 ${className}`}
-      {...props}
-    />
-  );
-}
-
-export default Card;
+            "postcss.config.js": """export default {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
 """,
-            "src/components/index.tsx": """export { Button } from "./Button";
-export { Card } from "./Card";
-""",
+            "src/index.css": index_css,
+            "src/main.tsx": main_tsx,
         }
+
         for relative_path, content in files.items():
             filepath = os.path.join(OUTPUT_DIR, relative_path)
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -410,322 +411,388 @@ export { Card } from "./Card";
 
         return f"Created deterministic project shell for {len(page_info)} pages."
 
-    async def generate_project_shell(self, state: dict) -> str:
-        return self._create_project_shell(state)
 
-    async def _generate_project_shell_with_mcp(self, state: dict) -> str:
-        pages_summary = [
-            {
-                "page_name": page.page_name,
-                "module": self._module_name(page.page_name),
-                "route": self._route_path(index=index, page_name=page.page_name),
-                "label": page.page_name,
-                "goal": page.page_goal,
-            }
-            for index, page in enumerate(state["page_design_output"].pages)
-        ]
+class DevServerManager:
+    """
+    Manages npm install / npm run dev the way a person running them in a
+    terminal would experience them: streamed output, readiness detected from
+    Vite's own stdout instead of a fixed sleep().
 
-        design_output = state.get("design_system_output")
-        if design_output:
-            self._write_tailwind_config(design_output)
-            self._write_index_css(design_output)
+    Deliberately built on subprocess.Popen + a background reader thread
+    rather than asyncio.create_subprocess_exec. asyncio's subprocess support
+    requires the Proactor event loop on Windows — if anything else in the
+    process (uvicorn, another library) has switched to the Selector event
+    loop, asyncio.create_subprocess_exec raises NotImplementedError. Popen
+    has no such dependency on which event loop is running, so this works
+    the same on every platform/loop combination. asyncio.to_thread() is used
+    to keep these blocking calls off the event loop.
+    """
+
+    @staticmethod
+    def _is_port_open(host: str = "127.0.0.1", port: int = 5173) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex((host, port)) == 0
+
+    @staticmethod
+    def _reader_thread(process: subprocess.Popen, out_queue: "queue.Queue[str | None]") -> None:
+        """Runs in a background thread: pushes each stdout line onto out_queue.
+        Puts None once the process closes stdout (exited or crashed)."""
+        try:
+            assert process.stdout is not None
+            for raw_line in process.stdout:
+                out_queue.put(raw_line.rstrip())
+        finally:
+            out_queue.put(None)
+
+    async def _drain_forever(self, out_queue: "queue.Queue[str | None]", label: str) -> None:
+        """Background task: keep pulling lines off the queue and logging them
+        for the lifetime of a long-running process (e.g. the dev server),
+        so the OS pipe buffer never fills up and blocks the child process."""
+        while True:
+            line = await asyncio.to_thread(out_queue.get)
+            if line is None:
+                return
+            if line:
+                logger.info("[%s] %s", label, line)
+
+    async def _run_streamed(self, cmd: list[str], cwd: str, label: str) -> tuple[int, list[str]]:
+        """Run a command to completion, logging each line as it arrives."""
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        out_queue: "queue.Queue[str | None]" = queue.Queue()
+        reader = threading.Thread(target=self._reader_thread, args=(process, out_queue), daemon=True)
+        reader.start()
+
+        lines: list[str] = []
+        while True:
+            line = await asyncio.to_thread(out_queue.get)
+            if line is None:
+                break
+            if line:
+                logger.info("[%s] %s", label, line)
+                lines.append(line)
+
+        returncode = await asyncio.to_thread(process.wait)
+        reader.join(timeout=2)
+        return returncode, lines
+
+    async def _start_and_wait_ready(
+        self, cmd: list[str], cwd: str, ready_markers: tuple[str, ...], timeout: int
+    ) -> tuple[subprocess.Popen, bool, list[str], asyncio.Task]:
+        """Start a long-running process (the dev server) and wait until one of
+        ready_markers shows up in its stdout, or until timeout elapses.
+        Returns the live process plus a background drain task that must be
+        cancelled when the process is later stopped."""
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        out_queue: "queue.Queue[str | None]" = queue.Queue()
+        reader = threading.Thread(target=self._reader_thread, args=(process, out_queue), daemon=True)
+        reader.start()
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        lines: list[str] = []
+        ready = False
+        crashed = False
+
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                line = await asyncio.to_thread(out_queue.get, True, remaining)
+            except queue.Empty:
+                break
+
+            if line is None:
+                crashed = True
+                break
+
+            if line:
+                logger.info("[vite] %s", line)
+                lines.append(line)
+                if any(marker in line for marker in ready_markers):
+                    ready = True
+                    break
+
+        # Whether or not it's ready yet, keep draining stdout in the
+        # background for as long as the process lives, so it never blocks
+        # on a full pipe buffer once we stop actively watching for "ready".
+        drain_task = asyncio.create_task(self._drain_forever(out_queue, "vite"))
+
+        if crashed:
+            process.wait()
+
+        return process, ready, lines, drain_task
+
+    async def install_and_start(self, output_dir: str) -> dict:
+        global DEV_SERVER_PROCESS
+
+        npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+
+        # ----------------------------------
+        # -----------------------------------------------------
+        # Only install if node_modules isn't already there
+        # -----------------------------------------------------
+        node_modules = os.path.join(output_dir, "node_modules")
+
+        if not os.path.exists(node_modules):
+            logger.info("No node_modules found — running npm install in %s...", output_dir)
+            install_returncode, install_lines = await self._run_streamed(
+                [npm_cmd, "install", "--no-fund", "--no-audit"],
+                cwd=output_dir,
+                label="npm install",
+            )
+
+            if install_returncode != 0:
+                return {
+                    "build_status": "Failed during npm install",
+                    "preview_url": None,
+                    "project_path": output_dir,
+                    "log_tail": install_lines[-40:],
+                }
         else:
-            self._write_index_css()
+            logger.info("node_modules already present — skipping install.")
 
-        os.makedirs(os.path.join(OUTPUT_DIR, "src", "components"), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "src", "pages"), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "src", "hooks"), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "src", "lib"), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "src", "assets"), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "public"), exist_ok=True)
+        if DEV_SERVER_PROCESS is not None:
+            process, _ = DEV_SERVER_PROCESS
+            if process.poll() is None:
+                logger.info("Vite dev server already running — reusing it.")
+                return {
+                    "build_status": "Success",
+                    "preview_url": "http://localhost:5173/site-preview/",
+                    "project_path": output_dir,
+                    "log_tail": ["Vite dev server already running."],
+                }
 
-        package = {
-            "name": "generated-website",
-            "private": True,
-            "version": "0.1.0",
-            "type": "module",
-            "scripts": {"dev": "vite", "build": "tsc -b && vite build", "preview": "vite preview"},
-            "dependencies": {
-                "@gsap/react": "^2.1.1",
-                "framer-motion": "^11.11.17",
-                "gsap": "^3.12.5",
-                "lenis": "^1.1.18",
-                "react": "^18.3.1",
-                "react-dom": "^18.3.1",
-                "react-router-dom": "^7.1.1",
-            },
-            "devDependencies": {
-                "@types/react": "^18.3.12",
-                "@types/react-dom": "^18.3.1",
-                "@vitejs/plugin-react": "^4.3.4",
-                "autoprefixer": "^10.4.20",
-                "postcss": "^8.4.49",
-                "tailwindcss": "^3.4.17",
-                "typescript": "^5.7.2",
-                "vite": "^6.0.5",
-            },
+        if self._is_port_open():
+            logger.info("Port 5173 is already serving — reusing existing dev server.")
+            return {
+                "build_status": "Success",
+                "preview_url": "http://localhost:5173/site-preview/",
+                "project_path": output_dir,
+                "log_tail": ["Port 5173 is already serving."],
+            }
+
+        # -----------------------------------------------------
+        # Stop any previously running dev server before starting a new one
+        # -----------------------------------------------------
+        if DEV_SERVER_PROCESS is not None:
+            logger.info("Stopping existing Vite dev server...")
+            old_process, old_drain_task = DEV_SERVER_PROCESS
+            try:
+                old_process.terminate()
+                try:
+                    await asyncio.to_thread(old_process.wait, 5)
+                except subprocess.TimeoutExpired:
+                    old_process.kill()
+                    await asyncio.to_thread(old_process.wait)
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.warning("Failed to stop existing dev server: %s", e)
+            old_drain_task.cancel()
+            DEV_SERVER_PROCESS = None
+
+        # -----------------------------------------------------
+        # Start `npm run dev`, same as a person typing it in a terminal,
+        # and wait until Vite itself reports it's serving requests.
+        # -----------------------------------------------------
+        logger.info("Starting npm run dev in %s...", output_dir)
+        process, ready, startup_lines, drain_task = await self._start_and_wait_ready(
+            [npm_cmd, "run", "dev", "--", "--port", "5173", "--strictPort"],
+            cwd=output_dir,
+            ready_markers=DEV_SERVER_READY_MARKERS,
+            timeout=DEV_SERVER_READY_TIMEOUT,
+        )
+        DEV_SERVER_PROCESS = (process, drain_task)
+
+        if process.poll() is not None:
+            # The process already exited — it crashed on startup.
+            drain_task.cancel()
+            DEV_SERVER_PROCESS = None
+            return {
+                "build_status": "Dev server exited during startup",
+                "preview_url": None,
+                "project_path": output_dir,
+                "log_tail": startup_lines[-40:],
+            }
+
+        if not ready:
+            return {
+                "build_status": f"Dev server did not report ready within {DEV_SERVER_READY_TIMEOUT}s",
+                "preview_url": None,
+                "project_path": output_dir,
+                "log_tail": startup_lines[-40:],
+            }
+
+        return {
+            "build_status": "Success",
+            "preview_url": "http://localhost:5173/site-preview/",   
+            "project_path": output_dir,
         }
 
-        imports = "\n".join(
-            f'import {page["module"]} from "./pages/{page["module"]}";'
-            for page in pages_summary
+
+
+    def get_status(self) -> dict:
+        """Reports whether the dev server is already running, without touching npm."""
+        global DEV_SERVER_PROCESS
+        if DEV_SERVER_PROCESS is not None:
+            process, _ = DEV_SERVER_PROCESS
+            if process.poll() is None:  # still alive
+                return {"running": True, "preview_url": "http://localhost:5173/site-preview/"}
+        if self._is_port_open():
+            return {"running": True, "preview_url": "http://localhost:5173/site-preview/"}
+        return {"running": False, "preview_url": None}
+
+
+class PageCodeAgent:
+    """Orchestrator Agent for generating React code."""
+
+    def __init__(self):
+        self.model = gemini_flash_llm()
+        self.shell_generator = ProjectShellGenerator()
+        self.prompt_builder = CodePromptBuilder()
+        self.server_manager = DevServerManager()
+
+    @staticmethod
+    def _extract_tsx(response) -> str:
+        content = getattr(response, "content", str(response))
+
+        if isinstance(content, list):
+            content = "".join(
+                c.get("text", "") if isinstance(c, dict) else str(c)
+                for c in content
+            )
+
+        match = re.search(
+            r"```(?:tsx|typescript|jsx|javascript)?\s*(.*?)```",
+            content,
+            re.DOTALL,
         )
-        routes = "\n".join(
-            f'          <Route path={json.dumps(page["route"])} element={{<{page["module"]} />}} />'
-            for page in pages_summary
-        )
 
-        files = {
-            "package.json": json.dumps(package, indent=2) + "\n",
-            "index.html": """<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Generated Website</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-""",
-            "tsconfig.json": """{
-  "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
-}
-""",
-            "tsconfig.app.json": """{
-  "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx"
-  },
-  "include": ["src"]
-}
-""",
-            "tsconfig.node.json": """{
-  "compilerOptions": {
-    "composite": true,
-    "skipLibCheck": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "allowSyntheticDefaultImports": true
-  },
-  "include": ["vite.config.ts"]
-}
-""",
-            "vite.config.ts": """import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "node:path";
+        code = match.group(1).strip() if match else content.strip()
 
-export default defineConfig({
-  plugins: [react()],
-  resolve: { alias: { "@": path.resolve(__dirname, "src") } },
-});
-""",
-            "src/main.tsx": self._build_main_tsx(pages_summary),
-            "src/index.css": """@tailwind base;
-@tailwind components;
-@tailwind utilities;
+        if "export default" not in code:
+            raise ValueError(
+                f"Model didn't return a TSX component.\n\n{content}"
+            )
 
-:root { font-family: Inter, system-ui, sans-serif; color: #0f172a; background: #f8fafc; }
-* { box-sizing: border-box; }
-html, body, #root { min-height: 100%; margin: 0; }
-body { min-width: 320px; }
-""",
-            "src/components/Button.tsx": """import type { ButtonHTMLAttributes } from "react";
+        return code
 
-export function Button({ className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      className={`rounded-full px-5 py-3 font-medium transition hover:opacity-80 ${className}`}
-      {...props}
-    />
-  );
-}
-
-export default Button;
-""",
-            "src/components/Card.tsx": """import type { HTMLAttributes } from "react";
-
-export function Card({ className = "", ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={`rounded-xl border border-white/10 bg-white/5 p-6 ${className}`}
-      {...props}
-    />
-  );
-}
-
-export default Card;
-""",
-            "src/components/index.tsx": """export { Button } from "./Button";
-export { Card } from "./Card";
-""",
-        }
-
-        for relative_path, content in files.items():
-            filepath = os.path.join(OUTPUT_DIR, relative_path)
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, "w", encoding="utf-8") as file:
-                file.write(content)
-
-        return f"Created deterministic project shell for {len(pages_summary)} pages."
+    async def generate_project_shell(self, state: dict) -> str:
+        """Called by nodes.py to create the React structure."""
+        return self.shell_generator.generate_shell(state)
 
     async def generate_single_page(self, state: dict, page_name: str, instruction: str = None) -> str:
-        page = next((p for p in state["page_design_output"].pages if p.page_name == page_name), None)
-        if not page:
-            raise ValueError(f"Page {page_name} not found in state.")
-            
-        module_name = self._module_name(page.page_name)
+        """Called by nodes.py to generate a single TSX page."""
+        module_name = ProjectShellGenerator._module_name(page_name)
         page_path = os.path.join(OUTPUT_DIR, "src", "pages", f"{module_name}.tsx")
 
-        style_key = state.get("selected_style", "glassmorphism")
-        style_instruction = STYLE_GUIDANCE.get(style_key, STYLE_GUIDANCE["glassmorphism"])
+        design_sys = state.get("design_system_output", "")
+        pages = state.get("page_design_output").pages if state.get("page_design_output") else []
+        blueprint = next((p for p in pages if p.page_name == page_name), "")
+        style = state.get("selected_style", "default")
 
-        design_output = state.get("design_system_output")
-        design_system_text = ""
-        if design_output:
-            design_system_text = f"""
-Design system:
-Colors:
-{design_output.colors.model_dump_json(indent=2)}
-Typography:
-{design_output.typography.model_dump_json(indent=2)}
-Spacing:
-{design_output.spacing.model_dump_json(indent=2)}
-Radius:
-{design_output.radius.model_dump_json(indent=2)}
-Shadows:
-{design_output.shadows.model_dump_json(indent=2)}
-Component guidelines:
-{[c.model_dump_json(indent=2) for c in design_output.component_guidelines]}
-"""
+        system_prompt = self.prompt_builder.build_system_prompt()
+        user_prompt = self.prompt_builder.build_user_prompt(blueprint, design_sys, style, instruction)
 
-        asset_plan_text = ""
-        asset_output = state.get("asset_output")
-        if asset_output:
-            page_assets = [
-                asset
-                for asset in asset_output.assets
-                if getattr(asset, "page_name", page_name) == page_name
-            ]
-            if page_assets:
-                asset_plan_text = "Planned asset slots for this page:\n" + "\n".join(
-                    (
-                        f"- asset_id: {asset.asset_id}\n"
-                        f"  section: {getattr(asset, 'section_name', '')}\n"
-                        f"  prompt: {getattr(asset, 'prompt', '')}\n"
-                        f"  size: {getattr(asset, 'width', '')}x{getattr(asset, 'height', '')}"
-                    )
-                    for asset in page_assets
-                )
-
-        pages = state["page_design_output"].pages
-        site_navigation = "\n".join(
-            f"- {self._route_path(index=index, page_name=page.page_name)}: {page.page_name}"
-            for index, page in enumerate(pages)
+        logger.info("Generating code for %s...", page_name)
+        response = await run_mcp_agent(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            allowed_servers=[
+                "heroui-react"
+            ],
+            llm=self.model
         )
-
-        prompt = f"""
-Generate exactly one complete React TSX page component.
-
-File path: {page_path}
-Default export name: {module_name}
-
-User request:
-{state["user_prompt"]}
-
-Page blueprint:
-{page.model_dump_json(indent=2)}
-
-{asset_plan_text}
-
-Site navigation:
-{site_navigation}
-
-If the site includes more than one page, include page-to-page navigation inside this page using react-router-dom. You can use:
-- <Link to="/other-page">Go to Other Page</Link>
-- or useNavigate() to navigate programmatically on button click.
-
-{design_system_text}
-Style guidance ({style_key}):
-{style_instruction}
-"""
-
-        if instruction:
-            prompt += f"\n\nUSER EDIT INSTRUCTION:\n{instruction}\nModify the page specifically to address this instruction."
-
-        prompt += f"""
-Requirements:
-- Return only the complete TSX source code. Do not inspect files, explain your work, or use markdown fences.
-- Use the design system colors, typography, spacing, shadows, and component guidelines to determine whether the page should use a light or dark theme.
-- Do not force a dark background. Choose light or dark styling based on the user prompt and design system.
-- Import ONLY from: React, react-router-dom, gsap, framer-motion, and existing components from '../components/Button', '../components/Card'
-- You can import Button and Card like this:
-  import Button from '../components/Button';
-  import Card from '../components/Card';
-  OR use named imports:
-  import {{ Button }} from '../components/Button';
-  import {{ Card }} from '../components/Card';
-- For other custom components you need, create them inline within this file as reusable React components.
-- Use placehold.co URLs for all images since assets are not generated yet.
-- IMPORTANT: If planned asset slots are listed above, create a placeholder <img> location for each planned asset that is visually appropriate for its section.
-- IMPORTANT: Use the exact planned `asset_id` values as `data-asset-id`. Do not rename, merge, or invent different IDs for planned assets.
-- IMPORTANT: Tag EVERY placeholder <img> element with `data-asset-id="unique_id"` and `data-asset-prompt="Highly detailed description of what the generated image should be, matching the design theme"`. Example:
-  <img src="https://placehold.co/800x600" data-asset-id="{module_name.lower()}_hero_bg" data-asset-prompt="Premium dark minimalist dashboard background, tech aesthetic, 4k" className="..." />
-- If this page is part of a multi-page website, include a Websites navigation tab or page-to-page links/buttons so users can move between generated pages.
-- Implement every section from PAGE BLUEPRINT in order.
-- Use GSAP for page animations (scroll reveals, card reveals, hover effects, section transitions).
-- Use the heroui-react MCP server only for creating reusable React components and component implementation details.
-- Do not treat the heroui-react MCP server as a full-page generator. The page structure should be composed locally from components that the MCP helps implement.
-- Do not include image-dependent animations (like parallax) for placeholder images yet. Parallax will be injected later.
-- Only include abstract background animations (like canvas particle nets or gradient blobs) if the selected style explicitly calls for them.
-- Export default {module_name}.
-- Do not rely on a Tailwind configuration file. Use standard Tailwind utility classes only.
-"""
-
-        code = None
-
-        try:
-            response_text = await run_mcp_agent(
-                prompt=prompt,
-                allowed_servers=["heroui-react"],
-                system_prompt="You are a senior frontend engineer. Return only valid, complete TSX source code.",
-                llm=self.model,
-                max_steps=20,
-            )
-            code = self._extract_tsx(response_text)
-            logger.info("Generated page source via heroui-react MCP: %s", page_path)
-        except Exception as mcp_exc:
-            logger.warning(
-                "heroui-react MCP generation failed: %s. Falling back to local model.",
-                mcp_exc,
-            )
-            response = await resilient_ainvoke(
-                self.model,
-                [
-                    SystemMessage(content="You are a senior frontend engineer. Return only valid, complete TSX source code."),
-                    HumanMessage(content=prompt),
-                ],
-                "generate_single_page_code",
-            )
-            code = self._extract_tsx(response)
-            logger.info("Generated page source directly: %s", page_path)
+        code = self._extract_tsx(response)
 
         os.makedirs(os.path.dirname(page_path), exist_ok=True)
         with open(page_path, "w", encoding="utf-8") as page_file:
             page_file.write(code + "\n")
         return f"Generated {page_path}."
+
+    async def generate_added_page(self, state: dict) -> dict:
+        page_name = state["page_name"]
+        message = await self.generate_single_page(state, page_name)
+        module_name = ProjectShellGenerator._module_name(page_name)
+        route = ProjectShellGenerator._route_path(page_name, 1)
+        return {
+            "message": message,
+            "module_name": module_name,
+            "route": route,
+            "file_path": f"src/pages/{module_name}.tsx",
+        }
+
+    def add_page_route(self, page_name: str) -> dict:
+        module_name = ProjectShellGenerator._module_name(page_name)
+        route = ProjectShellGenerator._route_path(page_name, 1)
+        main_path = os.path.join(OUTPUT_DIR, "src", "main.tsx")
+
+        if not os.path.exists(main_path):
+            raise FileNotFoundError(f"Generated site main file not found: {main_path}")
+
+        with open(main_path, "r", encoding="utf-8") as main_file:
+            content = main_file.read()
+
+        import_line = f'import {module_name} from "./pages/{module_name}";'
+        if import_line not in content:
+            page_imports = list(re.finditer(r'^import\s+\w+\s+from\s+"\.\/pages\/[^"]+";\s*$', content, re.MULTILINE))
+            if page_imports:
+                insert_at = page_imports[-1].end()
+                content = content[:insert_at] + "\n" + import_line + content[insert_at:]
+            else:
+                content = import_line + "\n" + content
+
+        route_line = f'        <Route path={json.dumps(route)} element={{<{module_name} />}} />'
+        if route_line not in content:
+            wildcard = re.search(r'\n\s*<Route path="\*" element=\{<Navigate to="/" replace />\} />', content)
+            if wildcard:
+                content = content[:wildcard.start()] + "\n" + route_line + content[wildcard.start():]
+            else:
+                content = content.replace("      </Routes>", f"{route_line}\n      </Routes>")
+
+        nav_line = (
+            f'          <NavLink to={json.dumps(route)} className={{({{ isActive }}) => '
+            f'(isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : '
+            f'"rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}}> '
+            f'{json.dumps(page_name)} </NavLink>'
+        )
+        if nav_line not in content:
+            nav_close = re.search(r'\n\s*</nav>', content)
+            if nav_close:
+                content = content[:nav_close.start()] + "\n" + nav_line + content[nav_close.start():]
+
+        with open(main_path, "w", encoding="utf-8") as main_file:
+            main_file.write(content)
+
+        return {
+            "route": route,
+            "file_path": f"src/pages/{module_name}.tsx",
+            "main_path": "src/main.tsx",
+        }
+
+    async def install_and_start_dev_server(self) -> dict:
+        """Called by nodes.py after all pages are generated."""
+        return await self.server_manager.install_and_start(OUTPUT_DIR)
+
+
+    def get_dev_server_status(self) -> dict:
+        """Called by main.py to check if a dev server is already running."""
+        return self.server_manager.get_status()

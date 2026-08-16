@@ -16,8 +16,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-PLANNING_MODEL = os.getenv("PLANNING_MODEL", "mistralai/mistral-nemotron")
-REASONING_MODEL = os.getenv("REASON_MODEL", "minimaxai/minimax-m2.7")
+PLANNING_MODEL = os.getenv("PLANNING_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+REASONING_MODEL = os.getenv("REASON_MODEL", "google/diffusiongemma-26b-a4b-it")
 RESEARCH_MODEL = os.getenv("RESEARCH_MODEL", "llama-3.3-70b-versatile")
 CODE_MODEL = os.getenv("CODE_MODEL", "deepseek-ai/deepseek-v4-pro")
 
@@ -55,7 +55,7 @@ def _build_gemini_llm(model_name: str, temperature: float):
 
 def gemini_flash_llm():
     return _build_gemini_llm(
-        "gemini-3.5-flash",
+        "gemini-2.5-flash",
         temperature=0.3,
     )
 

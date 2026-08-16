@@ -1,5 +1,35 @@
+# Environment
 .env
-.venv
-__pycache__
-.git
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# VS Code
+.vscode/
+
+# Generated output
 generated_site/
+
+# Node
+node_modules/
+
+# Research/output files
+raw_research.txt
+llm_tool_check_*.json
+
+# Test files
+test.py
+test_*.py
+*_test.py
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+assets/
