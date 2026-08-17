@@ -13,6 +13,8 @@ from node.nodes import (
     design_node,
     page_node,
     page_code_node,
+    website_repair_loop_node,
+    website_dev_server_node,
     asset_node,
     generation_node,
     asset_injection_node,
@@ -22,6 +24,7 @@ from node.nodes import (
     add_page_design_node,
     add_page_page_node,
     add_page_code_node,
+    add_page_repair_loop_node,
     add_page_route_node,
     add_page_dev_server_node,
     motion_node,
@@ -75,6 +78,16 @@ builder.add_node(
     page_code_node
 )
 
+builder.add_node(
+    "repair_loop",
+    website_repair_loop_node
+)
+
+builder.add_node(
+    "dev_server",
+    website_dev_server_node
+)
+
 
 builder.add_edge(
     START,
@@ -103,6 +116,16 @@ builder.add_edge(
 
 builder.add_edge(
     "page_code",
+    "repair_loop"
+)
+
+builder.add_edge(
+    "repair_loop",
+    "dev_server"
+)
+
+builder.add_edge(
+    "dev_server",
     END
 )
 
@@ -337,6 +360,7 @@ add_page.add_node("research", add_page_research_node)
 add_page.add_node("design", add_page_design_node)
 add_page.add_node("page", add_page_page_node)
 add_page.add_node("page_code", add_page_code_node)
+add_page.add_node("repair_loop", add_page_repair_loop_node)
 add_page.add_node("route_update", add_page_route_node)
 add_page.add_node("dev_server", add_page_dev_server_node)
 
@@ -345,7 +369,8 @@ add_page.add_edge("architect", "research")
 add_page.add_edge("research", "design")
 add_page.add_edge("design", "page")
 add_page.add_edge("page", "page_code")
-add_page.add_edge("page_code", "route_update")
+add_page.add_edge("page_code", "repair_loop")
+add_page.add_edge("repair_loop", "route_update")
 add_page.add_edge("route_update", "dev_server")
 add_page.add_edge("dev_server", END)
 
@@ -380,6 +405,10 @@ def _add_page_initial_state(
         "page_design_output": None,
         "page_code_output": None,
         "add_page_output": None,
+        "build_success": None,
+        "repair_attempts": None,
+        "repaired_files": None,
+        "log_tail": None,
     }
 
 
@@ -469,6 +498,10 @@ def _initial_state(
         "design_system_output": None,
         "page_design_output": None,
         "page_code_output": None,
+        "build_success": None,
+        "repair_attempts": None,
+        "repaired_files": None,
+        "log_tail": None,
     }
 
 

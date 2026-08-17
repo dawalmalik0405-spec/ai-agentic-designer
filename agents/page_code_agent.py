@@ -205,6 +205,109 @@ Page Blueprint:
 
         return prompt
 
+    @staticmethod
+    def build_repair_system_prompt() -> str:
+        return """You are the Code Repair Agent.
+
+Your only job is to fix compile/build errors in an existing React + TypeScript file.
+
+RULES:
+- Fix ONLY the listed compile errors.
+- Preserve layout, copy, design, sections, and styling unless a fix requires a minimal change.
+- Return the COMPLETE corrected file, not a diff or partial snippet.
+- Use valid HeroUI component props — consult HeroUI MCP tools if needed.
+- The file must compile with TypeScript and export default if it is a page component.
+- Return ONLY one ```tsx``` code block with the full file contents.
+- Do not add explanations outside the code block.
+"""
+
+    @staticmethod
+    def build_repair_user_prompt(
+        relative_path: str,
+        original_code: str,
+        errors: list,
+    ) -> str:
+        error_lines = []
+        for err in errors:
+            location = ""
+            if err.line is not None and err.column is not None:
+                location = f" ({err.line},{err.column})"
+            code_prefix = f"{err.code}: " if err.code else ""
+            error_lines.append(f"- {err.file}{location}: {code_prefix}{err.message}")
+
+        return f"""Repair this file so it compiles successfully.
+
+File: {relative_path}
+
+Compile errors to fix:
+{chr(10).join(error_lines)}
+
+Current file contents:
+```tsx
+{original_code}
+```
+
+Return the complete corrected file.
+"""
+
+    @staticmethod
+    def build_app_shell_system_prompt() -> str:
+        return """You are the App Shell Code Agent.
+
+Your responsibility is to generate the complete src/main.tsx entry file for a multi-page React site.
+
+This file MUST include:
+- All page imports and React Router routes for every supplied page
+- A site header with navigation links for every page
+- Navigation styled according to the Design System and navigation_style guidance
+- The createRoot bootstrap with BrowserRouter and Providers
+
+RULES:
+- Use the Design System colors, typography, and spacing for the navbar/header
+- Navigation link labels must be human-readable plain text (no JSON quotes in JSX text)
+- Use NavLink from react-router-dom for navigation with active-state styling
+- Import Providers from "./providers"
+- Import "./index.css"
+- Include a catch-all route redirecting to the home page
+- Use HeroUI MCP tools when HeroUI components fit the navigation design
+- Return ONLY one complete ```tsx``` code block containing the full main.tsx file
+- The file must compile without modification
+- Do not use placeholder text or lorem ipsum in the navbar
+"""
+
+    @staticmethod
+    def build_app_shell_user_prompt(
+        page_info: list[dict],
+        design_system,
+        navigation_style: str,
+        style_guidance: str,
+        instruction: str | None = None,
+    ) -> str:
+        pages_json = json.dumps(page_info, indent=2)
+        prompt = f"""Generate the complete src/main.tsx app shell for this website.
+
+Style Guidance:
+{style_guidance}
+
+Navigation Style:
+{navigation_style}
+
+Design System:
+{design_system}
+
+Pages (use these exact module names, routes, and labels):
+{pages_json}
+
+Requirements:
+- Import each page from "./pages/{{ModuleName}}"
+- Create a polished, brand-consistent header/nav using the design system
+- Wire every page into React Router
+- Link labels must match the "label" field exactly (plain text, no surrounding quotes)
+"""
+        if instruction:
+            prompt += f"\n\nAdditional instruction:\n{instruction}\n"
+        return prompt
+
 
 class ProjectShellGenerator:
     """Generates the foundational React project files synchronously."""
@@ -241,6 +344,20 @@ class ProjectShellGenerator:
         words = re.findall(r"[A-Za-z0-9]+", page_name.lower())
         return "/" + "-".join(words)
 
+    @staticmethod
+    def build_page_info(pages, existing_pages: list | None = None) -> list[dict]:
+        """Build routing metadata for app shell generation."""
+        all_pages = list(existing_pages or []) + list(pages)
+        page_info = []
+        for index, page in enumerate(all_pages):
+            page_name = page.page_name if hasattr(page, "page_name") else page.get("page_name")
+            page_info.append({
+                "module": ProjectShellGenerator._module_name(page_name),
+                "route": ProjectShellGenerator._route_path(page_name, index),
+                "label": page_name.strip(),
+            })
+        return page_info
+
     def generate_shell(self, state: dict) -> str:
         directories = [
             "src/components",
@@ -252,15 +369,6 @@ class ProjectShellGenerator:
         ]
         for directory in directories:
             os.makedirs(os.path.join(OUTPUT_DIR, directory), exist_ok=True)
-
-        pages = state["page_design_output"].pages
-        page_info = []
-        for index, page in enumerate(pages):
-            page_info.append({
-                "module": self._module_name(page.page_name),
-                "route": self._route_path(page.page_name, index),
-                "label": page.page_name,
-            })
 
         design_output = state.get("design_system_output")
 
@@ -327,47 +435,6 @@ body {{
 }}
 """
 
-        imports = "\n".join(f'import {item["module"]} from "./pages/{item["module"]}";' for item in page_info)
-        routes = "\n".join(f'        <Route path={json.dumps(item["route"])} element={{<{item["module"]} />}} />' for item in page_info)
-        nav_items = "\n".join(
-            f'          <NavLink to={json.dumps(item["route"])} className={{({{ isActive }}) => (isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : "rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}}> {json.dumps(item["label"])} </NavLink>'
-            for item in page_info
-        )
-        main_tsx = f'''import {{ StrictMode }} from "react";
-import {{ createRoot }} from "react-dom/client";
-import Providers from "./providers";
-
-import {{ BrowserRouter, NavLink, Route, Routes, Navigate }} from "react-router-dom";
-import "./index.css";
-{imports}
-
-const App = () => (
-  <div className="min-h-screen">
-    <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur">
-      <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3">
-{nav_items}
-      </nav>
-    </header>
-    <main className="p-4">
-      <Routes>
-{routes}
-        <Route path="*" element={{<Navigate to="/" replace />}} />
-      </Routes>
-    </main>
-  </div>
-);
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-        <Providers>
-            <App />
-        </Providers>
-    </BrowserRouter>
-  </StrictMode>,
-);
-'''
-
         files = {
             "package.json": json.dumps(package, indent=2) + "\n",
             "index.html": '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Generated Website</title>\n  </head>\n  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>\n</html>\n',
@@ -400,7 +467,6 @@ export default function Providers({
 };
 """,
             "src/index.css": index_css,
-            "src/main.tsx": main_tsx,
         }
 
         for relative_path, content in files.items():
@@ -409,7 +475,7 @@ export default function Providers({
             with open(filepath, "w", encoding="utf-8") as file:
                 file.write(content)
 
-        return f"Created deterministic project shell for {len(page_info)} pages."
+        return "Created project config shell (main.tsx generated separately by agent)."
 
 
 class DevServerManager:
@@ -695,9 +761,88 @@ class PageCodeAgent:
 
         return code
 
+    @staticmethod
+    def _extract_generated_file(response) -> str:
+        """Extract a full TSX/TS module (pages or main.tsx) from model output."""
+        content = getattr(response, "content", str(response))
+
+        if isinstance(content, list):
+            content = "".join(
+                c.get("text", "") if isinstance(c, dict) else str(c)
+                for c in content
+            )
+
+        match = re.search(
+            r"```(?:tsx|typescript|jsx|javascript|ts)?\s*(.*?)```",
+            content,
+            re.DOTALL,
+        )
+        code = match.group(1).strip() if match else content.strip()
+
+        if not code:
+            raise ValueError(f"Model returned empty file content.\n\n{content}")
+
+        return code
+
     async def generate_project_shell(self, state: dict) -> str:
-        """Called by nodes.py to create the React structure."""
+        """Called by nodes.py to create config files (package.json, vite, css, etc.)."""
         return self.shell_generator.generate_shell(state)
+
+    async def generate_app_shell(
+        self,
+        state: dict,
+        existing_pages: list | None = None,
+        instruction: str | None = None,
+    ) -> dict:
+        """Generate src/main.tsx with agent-designed navigation and routing."""
+        page_design = state.get("page_design_output")
+        if not page_design or not page_design.pages:
+            raise ValueError("page_design_output is required to generate app shell.")
+
+        page_info = ProjectShellGenerator.build_page_info(
+            page_design.pages,
+            existing_pages=existing_pages,
+        )
+        design_sys = state.get("design_system_output") or state.get("existing_design_system_output")
+        navigation_style = "Modern responsive navigation with clear page links."
+        global_rules = page_design.global_rules
+        if existing_pages and state.get("existing_page_design_output"):
+            global_rules = state["existing_page_design_output"].global_rules
+        if global_rules:
+            navigation_style = global_rules.navigation_style
+
+        style = state.get("selected_style", "default")
+        system_prompt = self.prompt_builder.build_app_shell_system_prompt()
+        user_prompt = self.prompt_builder.build_app_shell_user_prompt(
+            page_info=page_info,
+            design_system=design_sys,
+            navigation_style=navigation_style,
+            style_guidance=style,
+            instruction=instruction,
+        )
+
+        logger.info("Generating app shell (main.tsx) with %d pages...", len(page_info))
+        response = await run_mcp_agent(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            allowed_servers=["heroui-react"],
+            llm=self.model,
+        )
+        code = self._extract_generated_file(response)
+
+        main_path = os.path.join(OUTPUT_DIR, "src", "main.tsx")
+        os.makedirs(os.path.dirname(main_path), exist_ok=True)
+        with open(main_path, "w", encoding="utf-8") as main_file:
+            main_file.write(code + "\n")
+
+        home_route = page_info[0]["route"] if page_info else "/"
+        return {
+            "message": f"Generated {main_path}.",
+            "main_path": "src/main.tsx",
+            "page_info": page_info,
+            "route": home_route,
+            "file_path": "src/main.tsx",
+        }
 
     async def generate_single_page(self, state: dict, page_name: str, instruction: str = None) -> str:
         """Called by nodes.py to generate a single TSX page."""
@@ -728,11 +873,57 @@ class PageCodeAgent:
             page_file.write(code + "\n")
         return f"Generated {page_path}."
 
+    async def repair_file(
+        self,
+        relative_path: str,
+        original_code: str,
+        errors: list,
+        output_dir: str | None = None,
+    ) -> str:
+        """Repair a single file in the generated site using compile error context."""
+        site_dir = output_dir or OUTPUT_DIR
+        target_path = os.path.join(site_dir, relative_path.replace("/", os.sep))
+
+        system_prompt = self.prompt_builder.build_repair_system_prompt()
+        user_prompt = self.prompt_builder.build_repair_user_prompt(
+            relative_path,
+            original_code,
+            errors,
+        )
+
+        logger.info("Repairing %s (%d errors)...", relative_path, len(errors))
+        response = await run_mcp_agent(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            allowed_servers=["heroui-react"],
+            llm=self.model,
+        )
+        code = self._extract_tsx(response)
+
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as page_file:
+            page_file.write(code + "\n")
+        return f"Repaired {relative_path}."
+
+    @staticmethod
+    def module_name_to_page_name(module_name: str) -> str:
+        return re.sub(r"(?<!^)(?=[A-Z])", " ", module_name).strip() or module_name
+
     async def generate_added_page(self, state: dict) -> dict:
         page_name = state["page_name"]
         message = await self.generate_single_page(state, page_name)
         module_name = ProjectShellGenerator._module_name(page_name)
-        route = ProjectShellGenerator._route_path(page_name, 1)
+        existing_pages = list(state["existing_page_design_output"].pages)
+        shell_result = await self.generate_app_shell(
+            state,
+            existing_pages=existing_pages,
+            instruction=f'Add navigation link for the new page "{page_name.strip()}".',
+        )
+        new_page = state["page_design_output"].pages[0]
+        route = next(
+            (item["route"] for item in shell_result["page_info"] if item["module"] == module_name),
+            ProjectShellGenerator._route_path(page_name, len(existing_pages)),
+        )
         return {
             "message": message,
             "module_name": module_name,
@@ -741,47 +932,9 @@ class PageCodeAgent:
         }
 
     def add_page_route(self, page_name: str) -> dict:
+        """Deprecated: app shell is regenerated by generate_app_shell during add-page."""
         module_name = ProjectShellGenerator._module_name(page_name)
         route = ProjectShellGenerator._route_path(page_name, 1)
-        main_path = os.path.join(OUTPUT_DIR, "src", "main.tsx")
-
-        if not os.path.exists(main_path):
-            raise FileNotFoundError(f"Generated site main file not found: {main_path}")
-
-        with open(main_path, "r", encoding="utf-8") as main_file:
-            content = main_file.read()
-
-        import_line = f'import {module_name} from "./pages/{module_name}";'
-        if import_line not in content:
-            page_imports = list(re.finditer(r'^import\s+\w+\s+from\s+"\.\/pages\/[^"]+";\s*$', content, re.MULTILINE))
-            if page_imports:
-                insert_at = page_imports[-1].end()
-                content = content[:insert_at] + "\n" + import_line + content[insert_at:]
-            else:
-                content = import_line + "\n" + content
-
-        route_line = f'        <Route path={json.dumps(route)} element={{<{module_name} />}} />'
-        if route_line not in content:
-            wildcard = re.search(r'\n\s*<Route path="\*" element=\{<Navigate to="/" replace />\} />', content)
-            if wildcard:
-                content = content[:wildcard.start()] + "\n" + route_line + content[wildcard.start():]
-            else:
-                content = content.replace("      </Routes>", f"{route_line}\n      </Routes>")
-
-        nav_line = (
-            f'          <NavLink to={json.dumps(route)} className={{({{ isActive }}) => '
-            f'(isActive ? "rounded-full px-3 py-1.5 text-sm transition bg-slate-900 text-white" : '
-            f'"rounded-full px-3 py-1.5 text-sm transition text-slate-600 hover:bg-slate-100 hover:text-slate-900")}}> '
-            f'{json.dumps(page_name)} </NavLink>'
-        )
-        if nav_line not in content:
-            nav_close = re.search(r'\n\s*</nav>', content)
-            if nav_close:
-                content = content[:nav_close.start()] + "\n" + nav_line + content[nav_close.start():]
-
-        with open(main_path, "w", encoding="utf-8") as main_file:
-            main_file.write(content)
-
         return {
             "route": route,
             "file_path": f"src/pages/{module_name}.tsx",

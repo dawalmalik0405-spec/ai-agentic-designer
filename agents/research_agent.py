@@ -478,12 +478,6 @@ class ResearchAgent:
         print("\nResearch Text Length:")
         print(len(research_text))
 
-        with open(
-            "raw_research.txt",
-            "w",
-            encoding="utf-8"
-        ) as f:
-            f.write(research_text)
         
         research_output_response = await resilient_ainvoke(
             self.model,
