@@ -18,6 +18,7 @@ from fastapi.responses import (
     HTMLResponse,
 )
 from agents.page_code_agent import PageCodeAgent, ProjectShellGenerator
+from node.repair_nodes import run_repair_loop
 import json
 from pydantic import BaseModel
 from datetime import datetime
@@ -492,23 +493,72 @@ async def start_dev_server(
     if not GENERATED_SITE_DIR.exists():
         raise HTTPException(status_code=404, detail="No generated site found. Run generation first.")
 
+    project = db.query(ProjectDB).filter(ProjectDB.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     target_page = None
     if page_name:
-        project = db.query(ProjectDB).filter(ProjectDB.id == project_id).first()
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
         target_page = _find_project_page(project.graph_output, page_name)
         if not target_page:
             raise HTTPException(status_code=404, detail="Page not found in this project")
 
+    page_design_output = None
+    design_system_output = None
+    if project.graph_output:
+        stored = project.graph_output
+        if stored.get("page_design_output"):
+            page_design_output = PageDesignOutput(**stored["page_design_output"])
+        if stored.get("design_system_output"):
+            design_system_output = DesignSystemOutput(**stored["design_system_output"])
+
     agent = PageCodeAgent()
 
     async def run():
-        yield f"data: {json.dumps({'step': 'install', 'status': 'running', 'msg': 'Installing dependencies and starting dev server...'})}\n\n"
+        repair_result = None
+
+        if page_design_output:
+            progress_queue: asyncio.Queue = asyncio.Queue()
+
+            async def on_progress(step: str, status: str, msg: str, attempt: int | None = None):
+                await progress_queue.put({
+                    "step": step,
+                    "status": status,
+                    "msg": msg,
+                    "attempt": attempt,
+                })
+
+            async def repair_worker():
+                result = await run_repair_loop(
+                    generated_site_dir=str(GENERATED_SITE_DIR),
+                    page_design_output=page_design_output,
+                    design_system_output=design_system_output,
+                    selected_style="default",
+                    on_progress=on_progress,
+                )
+                await progress_queue.put({"_done": True, "result": result})
+
+            worker = asyncio.create_task(repair_worker())
+
+            while True:
+                event = await progress_queue.get()
+                if event.get("_done"):
+                    repair_result = event["result"]
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+
+            await worker
+
+            if repair_result and not repair_result.success:
+                error_msg = "Build repair failed.\n\n" + "\n".join(repair_result.log_tail)
+                yield f"data: {json.dumps({'step': 'build_check', 'status': 'error', 'msg': error_msg, 'attempt': repair_result.repair_attempts})}\n\n"
+                return
+
+        yield f"data: {json.dumps({'step': 'dev_server', 'status': 'running', 'msg': 'Installing dependencies and starting dev server...'})}\n\n"
         result = await agent.install_and_start_dev_server()
 
         if result["build_status"] != "Success":
-            yield f"data: {json.dumps({'step': 'build', 'status': 'error', 'msg': result['build_status'] + chr(10) + chr(10).join(result.get('log_tail', []))})}\n\n"
+            yield f"data: {json.dumps({'step': 'dev_server', 'status': 'error', 'msg': result['build_status'] + chr(10) + chr(10).join(result.get('log_tail', []))})}\n\n"
             return
 
         preview_url = _preview_url_for_page(target_page["route"] if target_page else None)
@@ -883,15 +933,29 @@ async def generate_page(
     }
 
     project.graph_output = serializable_result
-    project.status = "Generated"
+    project.status = "Failed" if result.get("build_success") is False else "Generated"
     project.pages = len(result["page_design_output"].pages) if result.get("page_design_output") else 0
     project.last_updated = datetime.utcnow()
     db.commit()
+
+    if result.get("build_success") is False:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Project generated but build repair failed.",
+                "repair_status": "failed",
+                "repair_attempts": result.get("repair_attempts") or 0,
+                "log_tail": result.get("log_tail") or [],
+            },
+        )
 
     return {
         "status": "success",
         "project_id": project.id,
         "graph_output": result,
+        "repair_status": "success",
+        "repair_attempts": result.get("repair_attempts") or 0,
+        "repaired_files": result.get("repaired_files") or [],
     }
 
 
@@ -962,6 +1026,21 @@ async def add_project_page(
     if not new_page_design_output or not new_page_design_output.pages:
         raise HTTPException(status_code=500, detail="Add page graph did not return a page design.")
 
+    if result.get("build_success") is False:
+        add_page_output = result.get("add_page_output")
+        log_tail = result.get("log_tail") or []
+        repair_attempts = result.get("repair_attempts") or 0
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Page code was generated but build repair failed.",
+                "repair_status": "failed",
+                "repair_attempts": repair_attempts,
+                "log_tail": log_tail,
+                "add_page_output": add_page_output.model_dump() if add_page_output else None,
+            },
+        )
+
     page_design_output.pages.append(new_page_design_output.pages[0])
 
     add_page_architect_output = result.get("architect_output")
@@ -989,6 +1068,10 @@ async def add_project_page(
         "status": "success",
         "project_id": project_id,
         "page_name": request.page_name,
+        "repair_status": "success",
+        "repair_attempts": result.get("repair_attempts") or 0,
+        "repaired_files": result.get("repaired_files") or [],
+        "log_tail": result.get("log_tail") or [],
         "add_page_output": add_page_output.model_dump() if hasattr(add_page_output, "model_dump") else add_page_output,
     }
 
