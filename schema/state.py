@@ -26,7 +26,12 @@ class WebsiteBuilderState(TypedDict):
 
     page_design_output: PageDesignOutput | None
 
-    page_code_output: CodeGenerationOutput | None 
+    page_code_output: CodeGenerationOutput | None
+
+    build_success: bool | None
+    repair_attempts: int | None
+    repaired_files: list[str] | None
+    log_tail: list[str] | None
 
 
 
@@ -83,6 +88,11 @@ class AddPageState(TypedDict):
     page_design_output: PageDesignOutput | None
     page_code_output: CodeGenerationOutput | None
     add_page_output: AddPageOutput | None
+
+    build_success: bool | None
+    repair_attempts: int | None
+    repaired_files: list[str] | None
+    log_tail: list[str] | None
 
 
 

@@ -14,3 +14,6 @@ class AddPageOutput(BaseModel):
     preview_url: str | None = None
     dev_server_status: str | None = None
     log_tail: list[str] = []
+    repair_status: str | None = None
+    repair_attempts: int | None = None
+    repaired_files: list[str] = []
