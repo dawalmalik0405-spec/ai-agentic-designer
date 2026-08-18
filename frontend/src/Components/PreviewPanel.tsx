@@ -65,7 +65,7 @@ export default function PreviewPanel({ projectId, pageName, pageRoute, pageFileP
   const startPreview = async () => {
     try {
       setBuildState('running');
-      setBuildLog('Starting preview server...');
+      setBuildLog('Checking build and starting preview server...');
       const params = pageName ? `?page_name=${encodeURIComponent(pageName)}` : '';
       const response = await fetch(`/api/projects/${projectId}/build${params}`, {
         method: 'POST',
@@ -92,7 +92,16 @@ export default function PreviewPanel({ projectId, pageName, pageRoute, pageFileP
           if (!line) continue;
 
           const data = JSON.parse(line.replace('data: ', ''));
-          if (data.msg) setBuildLog(data.msg);
+
+          if (data.step === 'build_check' && data.status === 'running') {
+            setBuildLog(data.msg || 'Checking build...');
+          } else if (data.step === 'repair' && data.status === 'running') {
+            setBuildLog(data.msg || `Repair attempt ${data.attempt || ''}...`.trim());
+          } else if (data.step === 'dev_server' && data.status === 'running') {
+            setBuildLog(data.msg || 'Starting dev server...');
+          } else if (data.msg) {
+            setBuildLog(data.msg);
+          }
 
           if (data.status === 'error') {
             setBuildState('error');
@@ -103,6 +112,7 @@ export default function PreviewPanel({ projectId, pageName, pageRoute, pageFileP
             setBuildState('ready');
             setPreviewUrl(data.preview_url);
             setBuildLog('Preview is ready.');
+            fetchCode();
           }
         }
       }
