@@ -114,7 +114,11 @@ export default function ChatPanel({
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
-          throw new Error(data.detail || 'Failed to generate new page.');
+          const detail = data.detail;
+          const message = typeof detail === 'object' && detail?.message
+            ? `${detail.message}${detail.log_tail?.length ? `\n\n${detail.log_tail.join('\n')}` : ''}`
+            : (typeof detail === 'string' ? detail : 'Failed to generate new page.');
+          throw new Error(message);
         }
 
         setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
