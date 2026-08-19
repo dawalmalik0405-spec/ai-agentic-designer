@@ -595,6 +595,7 @@ If using Vite dev mode, keep `npm run dev` running in `frontend/`.
 - Add per-page asset generation and injection controls.
 - Add code diff view after asset injection and add-page runs.
 - Add Playwright-based visual validation for generated previews.
+- next version will be where every agent will perform an action
 
 ## Status
 
