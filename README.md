@@ -600,3 +600,6 @@ If using Vite dev mode, keep `npm run dev` running in `frontend/`.
 ## Status
 
 This project is actively evolving. The current implementation supports the main project generation workflow, asset approval/injection workflow, and add-page workflow, but agent quality and provider reliability still depend on model availability, prompt size, and API latency.
+
+
+changed the codebase
